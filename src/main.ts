@@ -50,6 +50,7 @@ app.innerHTML = `
     <div class="top-actions"><button id="transform-button" class="icon-button" aria-label="生物变身">⚔</button><span id="clock" class="glass-pill">☀ 第 1 天 · 12:00</span><button id="fullscreen-button" class="icon-button fullscreen-button" aria-label="进入全屏" title="全屏游玩"><span aria-hidden="true">⛶</span><small>全屏</small></button><button id="menu-button" class="icon-button" aria-label="打开菜单">☰</button></div>
   </header>
   <div id="target-label" class="target-label">滑动屏幕，环顾四周</div>
+  <button id="overview-exit" class="overview-exit" aria-label="退出地图俯瞰">退出俯瞰地图</button>
   <div class="crosshair" aria-hidden="true"><i></i><i></i><b></b></div>
   <div id="damage-flash" class="damage-flash" aria-hidden="true"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -100,13 +101,14 @@ app.innerHTML = `
       <button id="journey-button" class="menu-option">世界旅程 <span>✦</span></button>
       <button id="mode-button" class="menu-option">游戏模式 <span id="mode-label">生存</span></button>
       <button id="camera-button" class="menu-option">切换视角 <span id="camera-label">第一人称</span></button>
+      <button id="overview-button" class="menu-option">俯瞰大地图 <span id="overview-label">开启</span></button>
       <button id="menu-fullscreen-button" class="menu-option">全屏显示 <span>⛶</span></button>
       <div class="view-settings">
-        <label for="view-zoom">游戏画面大小 <output id="view-zoom-label">120%</output></label>
-        <input id="view-zoom" type="range" min="0.85" max="1.8" step="0.05" value="1.2" aria-label="游戏画面大小" />
+        <label for="view-zoom">地图视野缩放 <output id="view-zoom-label">120%</output></label>
+        <input id="view-zoom" type="range" min="0.5" max="1.8" step="0.05" value="1.2" aria-label="地图视野缩放" />
         <label for="ui-size">按钮和快捷栏大小 <output id="ui-size-label">110%</output></label>
         <input id="ui-size" type="range" min="0.9" max="1.3" step="0.05" value="1.1" aria-label="按钮和快捷栏大小" />
-        <small>在游戏画面上用双指捏合，也能放大或缩小。</small>
+        <small>向左调到 50% 可看得更远；双指捏合也能缩放。俯瞰模式能一眼看到更大地图。</small>
       </div>
       <button id="command-button" class="menu-option">中文指令 <span>输入</span></button>
       <button id="flight-button" class="menu-option">飞行 <span id="flight-label">关闭</span></button>
@@ -273,6 +275,7 @@ type SaveData = {
   experience: number
   viewZoom?: number
   uiScale?: number
+  cameraMode?: 0 | 1 | 2 | 3
   benchSize: number
   unlockedMobs: MobKind[]
   transform: MobKind | null
@@ -312,8 +315,9 @@ function readSave(): SaveData | null {
       health: Number.isFinite(save.health) ? Math.max(0, Math.min(save.transform && save.transform in mobInfo ? mobInfo[save.transform].health : 40, save.health)) : 40,
       hunger: Number.isFinite(save.hunger) ? Math.max(0, Math.min(20, save.hunger)) : 20,
       experience: Number.isFinite(save.experience) ? Math.max(0, save.experience) : 0,
-      viewZoom: Number.isFinite(save.viewZoom) ? Math.max(0.85, Math.min(1.8, save.viewZoom!)) : 1.2,
+      viewZoom: Number.isFinite(save.viewZoom) ? Math.max(0.5, Math.min(1.8, save.viewZoom!)) : 1.2,
       uiScale: Number.isFinite(save.uiScale) ? Math.max(0.9, Math.min(1.3, save.uiScale!)) : 1.1,
+      cameraMode: [0, 1, 2, 3].includes(save.cameraMode ?? -1) ? save.cameraMode : 0,
       benchSize: Number.isInteger(save.benchSize) ? Math.max(9, Math.min(3000, save.benchSize)) : 9,
       unlockedMobs: Array.isArray(save.unlockedMobs) ? save.unlockedMobs.filter((id): id is MobKind => id in mobInfo) : [],
       transform: save.transform && save.transform in mobInfo ? save.transform : null,
@@ -364,7 +368,7 @@ const player = {
   velocityY: 0,
   grounded: false,
 }
-let thirdPerson = false
+let thirdPerson = (saved?.cameraMode ?? 0) !== 0
 let flying = false
 let flyRise = false
 const avatar = new THREE.Group()
@@ -412,7 +416,7 @@ let craftChoice: ItemId | null = null
 let craftGrid: (ItemId | null)[] = Array(4).fill(null)
 let chosenRecipe: (typeof recipes)[number] | null = null
 let sleeping = false
-let cameraMode: 0 | 1 | 2 = 0
+let cameraMode: 0 | 1 | 2 | 3 = saved?.cameraMode ?? 0
 const unlockedMobs = new Set<MobKind>(saved?.unlockedMobs ?? [])
 let transform = saved?.transform ?? null
 let itemForm = saved?.itemForm ?? null
@@ -548,7 +552,9 @@ function updateStatus(): void {
   $('#experience').textContent = `✦ ${Math.floor(experience)}`
   $('#bench-label').textContent = usingWorkbench ? `${benchSize} 格` : '随身 2×2'
   $('#bench-label').classList.toggle('rainbow', benchSize === 3000)
-  $('#camera-label').textContent = ['第一人称', '第三人称', '前置视角'][cameraMode]
+  $('#camera-label').textContent = ['第一人称', '第三人称', '前置视角', '地图俯瞰'][cameraMode]
+  $('#overview-label').textContent = cameraMode === 3 ? '退出' : '开启'
+  app.classList.toggle('overview', cameraMode === 3)
   $('#flight-label').textContent = flying || mode === 'spectator' ? '开启' : '关闭'
   $('#coins-label').textContent = `${coins} ＋`
 }
@@ -640,6 +646,7 @@ function saveWorld(): void {
     experience,
     viewZoom,
     uiScale,
+    cameraMode,
     benchSize,
     unlockedMobs: [...unlockedMobs],
     transform,
@@ -675,8 +682,8 @@ function showToast(message: string): void {
 }
 
 function setViewZoom(value: number): void {
-  viewZoom = Math.max(0.85, Math.min(1.8, Math.round(value * 20) / 20))
-  camera.fov = 72 / viewZoom
+  viewZoom = Math.max(0.5, Math.min(1.8, Math.round(value * 20) / 20))
+  camera.fov = viewZoom >= 1 ? 72 / viewZoom : 72 + (1 - viewZoom) * 72
   camera.updateProjectionMatrix()
   $<HTMLInputElement>('#view-zoom').value = String(viewZoom)
   $('#view-zoom-label').textContent = `${Math.round(viewZoom * 100)}%`
@@ -737,7 +744,11 @@ function updateCamera(): void {
   avatar.rotation.z = emoteUntil > performance.now() ? Math.sin(performance.now() * 0.004 * (1 + emoteIndex % 4)) * (0.12 + emoteIndex % 5 * 0.05) : 0
   avatar.rotation.x = emoteUntil > performance.now() ? Math.cos(performance.now() * 0.003 * (1 + emoteIndex % 3)) * (0.08 + emoteIndex % 7 * 0.035) : 0
   avatar.visible = thirdPerson && !transform && !itemForm && skinShape !== 'air'
-  if (cameraMode === 2) {
+  if (cameraMode === 3) {
+    const back = 1.5 / viewZoom
+    camera.position.set(player.x + Math.sin(player.yaw) * back, player.foot + 11 / viewZoom, player.z + Math.cos(player.yaw) * back)
+    camera.lookAt(player.x, player.foot + 0.8, player.z)
+  } else if (cameraMode === 2) {
     camera.position.set(player.x - Math.sin(player.yaw) * cameraDistance, player.foot + (crouching ? 1.4 : 1.85), player.z - Math.cos(player.yaw) * cameraDistance)
     camera.lookAt(player.x, player.foot + 1.1, player.z)
   } else if (thirdPerson) {
@@ -750,6 +761,10 @@ function updateCamera(): void {
   } else {
     camera.position.set(player.x, player.foot + (crouching ? 1.16 : 1.58), player.z)
     camera.rotation.set(player.pitch, player.yaw, 0)
+  }
+  if (scene.fog instanceof THREE.Fog) {
+    scene.fog.near = cameraMode === 3 ? 40 : 22
+    scene.fog.far = cameraMode === 3 ? 120 : 74
   }
 }
 
@@ -767,6 +782,12 @@ let currentTarget: Target | null = null
 let currentMob: Mob | null = null
 
 function updateTarget(): void {
+  if (cameraMode === 3) {
+    currentMob = null
+    currentTarget = null
+    targetOutline.visible = false
+    return
+  }
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera)
   const hit = raycaster.intersectObject(world.mesh, false)[0]
   const mobHit = entities.target(camera)
@@ -1230,6 +1251,7 @@ function attackMob(mob: Mob): void {
 
 function mine(): void {
   if (!playing || panelOpen) return
+  if (cameraMode === 3) return showToast('请先退出地图俯瞰，再挖掘或攻击')
   if (currentMob) return attackMob(currentMob)
   if (mode === 'spectator' || mode === 'adventure') return showToast('当前模式不能挖掘方块')
   const held = inventory[selectedIndex]?.id
@@ -1328,6 +1350,7 @@ function dropFromSlot(index: number, wholeStack: boolean): void {
 
 function place(): void {
   if (!playing || panelOpen) return
+  if (cameraMode === 3) return showToast('请先退出地图俯瞰，再放置或使用物品')
   const slot = inventory[selectedIndex]
   if (!slot) return showToast('选择一种材料后再放置')
   if (foodValues[slot.id]) return eatFood(selectedIndex)
@@ -1867,11 +1890,25 @@ $('#mode-button').addEventListener('click', () => {
   showToast(`已切换到${modeNames[mode]}模式`)
 })
 $('#camera-button').addEventListener('click', () => {
-  cameraMode = ((cameraMode + 1) % 3) as 0 | 1 | 2
+  cameraMode = ((cameraMode + 1) % 4) as 0 | 1 | 2 | 3
   thirdPerson = cameraMode !== 0
+  if (cameraMode === 3 && viewZoom > 0.6) setViewZoom(0.6)
   updateStatus()
-  showToast(`已切换${['第一人称', '第三人称', '前置视角'][cameraMode]}`)
+  if (cameraMode === 3) closePanels()
+  saveWorld()
+  showToast(`已切换${['第一人称', '第三人称', '前置视角', '地图俯瞰'][cameraMode]}`)
 })
+function toggleOverview(): void {
+  cameraMode = cameraMode === 3 ? 0 : 3
+  thirdPerson = cameraMode !== 0
+  if (cameraMode === 3 && viewZoom > 0.6) setViewZoom(0.5)
+  updateStatus()
+  closePanels()
+  saveWorld()
+  showToast(cameraMode === 3 ? '已开启地图俯瞰；右上角可退出' : '已返回第一人称视角')
+}
+$('#overview-button').addEventListener('click', toggleOverview)
+$('#overview-exit').addEventListener('click', toggleOverview)
 $<HTMLInputElement>('#view-zoom').addEventListener('input', (event) => setViewZoom(Number((event.target as HTMLInputElement).value)))
 $<HTMLInputElement>('#view-zoom').addEventListener('change', saveWorld)
 $<HTMLInputElement>('#ui-size').addEventListener('input', (event) => setUiScale(Number((event.target as HTMLInputElement).value)))

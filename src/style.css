@@ -33,6 +33,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fbe18b; outline-
 .fullscreen-button { width: 56px; height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; background: #f7d574; border-color: #fff2c0; color: #3c4d35; }
 .fullscreen-button span { font-size: 21px; line-height: 20px; }
 .fullscreen-button small { font-size: 10px; line-height: 12px; font-weight: 900; }
+.overview-exit { display: none; position: absolute; z-index: 4; top: calc(env(safe-area-inset-top) + 70px); right: 18px; min-height: 40px; padding: 0 14px; border: 1px solid #fff3bb; border-radius: 12px; background: #f7d574; color: #3c4d35; font-size: 12px; font-weight: 900; box-shadow: 0 5px 18px #273f3544; }
+#app.overview .overview-exit { display: block; }
+#app.overview .bottom-hud, #app.overview .action-controls, #app.overview .movement-controls, #app.overview .crosshair, #app.overview .target-label { display: none; }
 
 .crosshair { position: absolute; z-index: 1; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%,-50%); pointer-events: none; filter: drop-shadow(0 1px 3px #365354); }
 .crosshair i { position: absolute; display: block; background: white; border-radius: 2px; }
