@@ -1,0 +1,17 @@
+{$GAME_DOMAIN} {
+  encode zstd gzip
+
+  handle /api/* {
+    reverse_proxy app:3000
+  }
+
+  handle /socket {
+    reverse_proxy app:3000
+  }
+
+  handle {
+    root * /srv/game
+    try_files {path} /index.html
+    file_server
+  }
+}

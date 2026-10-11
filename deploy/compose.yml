@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wonder_world
+      POSTGRES_USER: wonder_world
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in a private .env file}
+    volumes:
+      - game_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wonder_world -d wonder_world"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  app:
+    build:
+      context: ../server
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://wonder_world:${DB_PASSWORD}@db:5432/wonder_world
+      ALLOWED_ORIGINS: https://${GAME_DOMAIN},https://sxlxdys1-ctrl.github.io
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    environment:
+      GAME_DOMAIN: ${GAME_DOMAIN:?Set GAME_DOMAIN to the game's DNS name}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  game_db:
+  caddy_data:
+  caddy_config:
