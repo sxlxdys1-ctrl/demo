@@ -1,4 +1,6 @@
 :root {
+  --ui-scale: 1;
+  --ui-offset: 0px;
   font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   color: #fffdf5;
   background: #96d2df;
@@ -28,9 +30,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fbe18b; outline-
 .top-actions { pointer-events: auto; }
 .glass-pill { white-space: nowrap; padding: 10px 12px; border: 1px solid rgba(255,255,255,.43); border-radius: 13px; background: rgba(16,48,53,.54); font-size: 11px; font-weight: 700; backdrop-filter: blur(12px); }
 .icon-button { width: 37px; height: 37px; border-radius: 13px; border: 1px solid rgba(255,255,255,.45); color: white; background: rgba(16,48,53,.62); font-size: 19px; backdrop-filter: blur(12px); }
-.fullscreen-button { width: 45px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; }
-.fullscreen-button span { font-size: 19px; line-height: 17px; }
-.fullscreen-button small { font-size: 8px; line-height: 11px; font-weight: 800; }
+.fullscreen-button { width: 56px; height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; background: #f7d574; border-color: #fff2c0; color: #3c4d35; }
+.fullscreen-button span { font-size: 21px; line-height: 20px; }
+.fullscreen-button small { font-size: 10px; line-height: 12px; font-weight: 900; }
 
 .crosshair { position: absolute; z-index: 1; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%,-50%); pointer-events: none; filter: drop-shadow(0 1px 3px #365354); }
 .crosshair i { position: absolute; display: block; background: white; border-radius: 2px; }
@@ -40,11 +42,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fbe18b; outline-
 .damage-flash { position: absolute; z-index: 5; inset: 0; background: rgba(226,32,40,.32); opacity: 0; pointer-events: none; }
 .damage-flash.visible { animation: damage-flash .55s ease-out forwards; }
 @keyframes damage-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
-.target-label { position: absolute; z-index: 1; top: calc(50% + 20px); left: 50%; transform: translateX(-50%); max-width: 75vw; padding: 6px 12px; border-radius: 100px; background: rgba(19,48,49,.53); white-space: nowrap; text-align: center; font-size: 11px; font-weight: 700; text-shadow: 0 1px 2px #315055; pointer-events: none; backdrop-filter: blur(8px); }
+.target-label { position: absolute; z-index: 1; top: calc(50% + 20px); left: 50%; transform: translateX(-50%) scale(var(--ui-scale)); transform-origin: center top; max-width: 75vw; padding: 6px 12px; border-radius: 100px; background: rgba(19,48,49,.53); white-space: nowrap; text-align: center; font-size: 11px; font-weight: 700; text-shadow: 0 1px 2px #315055; pointer-events: none; backdrop-filter: blur(8px); }
 .toast { position: absolute; z-index: 6; top: calc(env(safe-area-inset-top) + 72px); left: 50%; transform: translate(-50%,-8px); padding: 10px 17px; background: #fffdf1; border-radius: 12px; color: #365147; font-size: 12px; font-weight: 800; box-shadow: 0 7px 25px rgba(29,55,43,.2); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; white-space: nowrap; }
 .toast.visible { opacity: 1; transform: translate(-50%,0); }
 
-.bottom-hud { position: absolute; z-index: 2; bottom: calc(env(safe-area-inset-bottom) + 13px); left: 50%; transform: translateX(-50%); width: min(97vw, 485px); pointer-events: none; }
+.bottom-hud { position: absolute; z-index: 2; bottom: calc(env(safe-area-inset-bottom) + 13px); left: 50%; transform: translateX(-50%) scale(var(--ui-scale)); transform-origin: center bottom; width: min(97vw, 485px); pointer-events: none; }
 .status-line { width: max-content; max-width: 100%; display: flex; align-items: center; gap: 12px; padding: 7px 13px; margin: 0 auto 8px; background: rgba(16,47,50,.66); border: 1px solid rgba(255,255,255,.31); border-radius: 100px; color: #e1eee9; font-size: 10px; font-weight: 700; backdrop-filter: blur(10px); }
 .status-line { flex-wrap: wrap; justify-content: center; gap: 4px 11px; }
 .mode-chip { color: #ffe18b; }
@@ -57,13 +59,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fbe18b; outline-
 .block-swatch.glass { border-color: #d8f9ee; box-shadow: inset 2px 2px rgba(255,255,255,.72), inset -3px -3px rgba(84,155,162,.4), 0 2px 4px rgba(11,41,37,.2); }
 .empty-swatch { opacity: .55; font-size: 22px; }
 
-.joystick { position: absolute; z-index: 3; bottom: calc(env(safe-area-inset-bottom) + 132px); left: 21px; width: 116px; height: 116px; border-radius: 50%; border: 2px solid rgba(255,255,255,.55); background: rgba(20,57,61,.34); box-shadow: inset 0 0 0 11px rgba(255,255,255,.08), 0 10px 28px rgba(20,57,61,.12); backdrop-filter: blur(4px); display: grid; place-items: center; touch-action: none; user-select: none; }
+.joystick { position: absolute; z-index: 3; bottom: calc(env(safe-area-inset-bottom) + 132px); left: 21px; width: 116px; height: 116px; transform: scale(var(--ui-scale)); transform-origin: left bottom; border-radius: 50%; border: 2px solid rgba(255,255,255,.55); background: rgba(20,57,61,.34); box-shadow: inset 0 0 0 11px rgba(255,255,255,.08), 0 10px 28px rgba(20,57,61,.12); backdrop-filter: blur(4px); display: grid; place-items: center; touch-action: none; user-select: none; }
 .joystick-knob { width: 53px; height: 53px; border-radius: 50%; display: grid; place-items: center; color: #336451; background: #f7e6a8; border: 3px solid rgba(255,255,255,.9); box-shadow: 0 6px 16px rgba(18,58,52,.25); font-size: 23px; pointer-events: none; }
-.movement-controls { position: absolute; z-index: 3; left: 24px; bottom: calc(env(safe-area-inset-bottom) + 250px); display: flex; gap: 7px; }
+.movement-controls { position: absolute; z-index: 3; left: 24px; bottom: calc(env(safe-area-inset-bottom) + 250px + var(--ui-offset)); display: flex; gap: 7px; transform: scale(var(--ui-scale)); transform-origin: left bottom; }
 .small-action { width: 52px; height: 48px; border-radius: 14px; }
 .small-action .action-icon { font-size: 17px; line-height: 1; }
 .round-action[aria-pressed=true] { background: #f6d574; color: #3b4d32; border-color: #fff3c0; }
-.action-controls { position: absolute; z-index: 3; bottom: calc(env(safe-area-inset-bottom) + 131px); right: 20px; display: grid; grid-template-columns: repeat(2, 59px); gap: 9px; align-items: center; }
+.action-controls { position: absolute; z-index: 3; bottom: calc(env(safe-area-inset-bottom) + 131px); right: 20px; display: grid; grid-template-columns: repeat(2, 59px); gap: 9px; align-items: center; transform: scale(var(--ui-scale)); transform-origin: right bottom; }
 .round-action { width: 59px; height: 59px; border-radius: 19px; border: 2px solid rgba(255,255,255,.73); background: rgba(33,73,71,.65); color: white; box-shadow: 0 6px 16px rgba(18,58,52,.15); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 0; touch-action: manipulation; user-select: none; }
 .round-action small { font-size: 9px; font-weight: 800; line-height: 1.1; }
 .action-icon { font-size: 24px; font-weight: 800; line-height: 1.2; }
@@ -83,6 +85,7 @@ h1 em { font-style: normal; color: #69a979; }
 .primary-button { width: 100%; min-height: 49px; border: 0; border-radius: 14px; background: #78b889; color: white; font-size: 14px; font-weight: 900; box-shadow: 0 7px 0 #5c9d70, 0 12px 22px rgba(78,142,91,.17); }
 .primary-button span { margin-left: 7px; }
 .primary-button:active { transform: translateY(4px); box-shadow: 0 3px 0 #5c9d70; }
+.fullscreen-entry-button { display: block; width: 100%; min-height: 48px; margin: 0 0 12px; border: 2px solid #d5b64e; border-radius: 14px; background: #fff0ac; color: #5a552e; font-size: 16px; font-weight: 900; box-shadow: 0 5px 0 #dfcb72; }
 .welcome-note { display: block; margin-top: 19px; color: #8b9f95; font-size: 9px; }
 
 .panel-overlay { z-index: 12; }
@@ -141,6 +144,11 @@ h2 span { color: #82aa87; font-size: 13px; }
 .recipe-card button { flex: none; min-width: 74px; padding: 8px; border: 0; border-radius: 8px; background: #73b184; color: white; font-size: 11px; font-weight: 800; }
 .recipe-card button:disabled { background: #d9e2d5; color: #7f9484; }
 .menu-option:disabled { opacity: .53; cursor: not-allowed; }
+.view-settings { display: grid; gap: 7px; margin: 12px 0; padding: 12px; border: 1px solid #d9e5d5; border-radius: 12px; background: #f4f6ed; }
+.view-settings label { display: flex; justify-content: space-between; color: #486956; font-size: 12px; font-weight: 800; }
+.view-settings output { color: #679a72; }
+.view-settings input { width: 100%; accent-color: #75b785; touch-action: manipulation; }
+.view-settings small { color: #829386; font-size: 10px; }
 .menu-option small { flex-basis: 100%; color: #8ba08e; font-size: 10px; font-weight: 500; }
 .form-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; color: #547160; font-size: 12px; font-weight: 800; }
 .form-label input[type=color] { width: 55px; height: 34px; padding: 2px; border: 1px solid #cedccb; border-radius: 9px; background: white; }
@@ -169,11 +177,15 @@ h2 span { color: #82aa87; font-size: 13px; }
   .brand-mark { width: 28px; height: 28px; font-size: 18px; }
   .glass-pill { font-size: 9px; padding: 9px 7px; }
   .icon-button { width: 33px; height: 33px; }
-  .fullscreen-button { width: 40px; }
+  .fullscreen-button { width: 47px; height: 38px; }
   .top-actions { gap: 4px; }
   .brand small { display: none; }
   .block-swatch { width: 22px; height: 22px; }
   .hotbar { gap: 2px; padding: 5px; }
+}
+
+@media (max-width: 600px) and (orientation: portrait) {
+  .bottom-hud { transform: translateX(-50%); }
 }
 
 @media (max-width: 360px) {
@@ -185,7 +197,7 @@ h2 span { color: #82aa87; font-size: 13px; }
   .joystick { bottom: calc(env(safe-area-inset-bottom) + 75px); width: 95px; height: 95px; }
   .joystick-knob { width: 46px; height: 46px; }
   .action-controls { bottom: calc(env(safe-area-inset-bottom) + 79px); grid-template-columns: repeat(2, 50px); gap: 5px; }
-  .movement-controls { left: 11px; bottom: calc(env(safe-area-inset-bottom) + 177px); }
+  .movement-controls { left: 11px; bottom: calc(env(safe-area-inset-bottom) + 177px + var(--ui-offset)); }
   .small-action { width: 46px; height: 39px; }
   .round-action { width: 50px; height: 50px; border-radius: 15px; }
   .action-icon { font-size: 18px; }

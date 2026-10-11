@@ -63,6 +63,7 @@ app.innerHTML = `
       <h1>超级好玩的<br><em>小世界</em></h1>
       <p>从一块草地开始，挖出你的灵感，搭起独一无二的小天地。</p>
       <div class="instruction-row"><span>◉ 左边摇杆移动</span><span>↔ 右边滑动视角</span></div>
+      <button id="welcome-fullscreen-button" class="fullscreen-entry-button">⛶ 全屏显示</button>
       <button id="start-button" class="primary-button">全屏进入我的世界 <span>→</span></button>
       <button id="welcome-skin-button" class="menu-option">制作皮肤 <span>✎</span></button>
       <small class="welcome-note">进度保存在此浏览器中 · 建议横屏探索</small>
@@ -87,6 +88,14 @@ app.innerHTML = `
       <button id="journey-button" class="menu-option">世界旅程 <span>✦</span></button>
       <button id="mode-button" class="menu-option">游戏模式 <span id="mode-label">生存</span></button>
       <button id="camera-button" class="menu-option">切换视角 <span id="camera-label">第一人称</span></button>
+      <button id="menu-fullscreen-button" class="menu-option">全屏显示 <span>⛶</span></button>
+      <div class="view-settings">
+        <label for="view-zoom">游戏画面大小 <output id="view-zoom-label">120%</output></label>
+        <input id="view-zoom" type="range" min="0.85" max="1.8" step="0.05" value="1.2" aria-label="游戏画面大小" />
+        <label for="ui-size">按钮和快捷栏大小 <output id="ui-size-label">110%</output></label>
+        <input id="ui-size" type="range" min="0.9" max="1.3" step="0.05" value="1.1" aria-label="按钮和快捷栏大小" />
+        <small>在游戏画面上用双指捏合，也能放大或缩小。</small>
+      </div>
       <button id="command-button" class="menu-option">中文指令 <span>输入</span></button>
       <button id="flight-button" class="menu-option">飞行 <span id="flight-label">关闭</span></button>
       <button id="coins-button" class="menu-option">金币（点击 ＋ 免费增加） <span id="coins-label">0 ＋</span></button>
@@ -243,6 +252,8 @@ type SaveData = {
   health: number
   hunger: number
   experience: number
+  viewZoom?: number
+  uiScale?: number
   benchSize: number
   unlockedMobs: MobKind[]
   transform: MobKind | null
@@ -281,6 +292,8 @@ function readSave(): SaveData | null {
       health: Number.isFinite(save.health) ? Math.max(0, Math.min(save.transform && save.transform in mobInfo ? mobInfo[save.transform].health : 40, save.health)) : 40,
       hunger: Number.isFinite(save.hunger) ? Math.max(0, Math.min(20, save.hunger)) : 20,
       experience: Number.isFinite(save.experience) ? Math.max(0, save.experience) : 0,
+      viewZoom: Number.isFinite(save.viewZoom) ? Math.max(0.85, Math.min(1.8, save.viewZoom!)) : 1.2,
+      uiScale: Number.isFinite(save.uiScale) ? Math.max(0.9, Math.min(1.3, save.uiScale!)) : 1.1,
       benchSize: Number.isInteger(save.benchSize) ? Math.max(9, Math.min(3000, save.benchSize)) : 9,
       unlockedMobs: Array.isArray(save.unlockedMobs) ? save.unlockedMobs.filter((id): id is MobKind => id in mobInfo) : [],
       transform: save.transform && save.transform in mobInfo ? save.transform : null,
@@ -370,6 +383,8 @@ let mode: GameMode = saved?.mode ?? 'survival'
 let health = saved?.health ?? 40
 let hunger = saved?.hunger ?? 20
 let experience = saved?.experience ?? 0
+let viewZoom = saved?.viewZoom ?? 1.2
+let uiScale = saved?.uiScale ?? 1.1
 let benchSize = saved?.benchSize ?? 9
 let usingWorkbench = false
 let craftChoice: ItemId | null = null
@@ -574,6 +589,8 @@ function saveWorld(): void {
     health,
     hunger,
     experience,
+    viewZoom,
+    uiScale,
     benchSize,
     unlockedMobs: [...unlockedMobs],
     transform,
@@ -607,6 +624,22 @@ function showToast(message: string): void {
   toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2200)
 }
 
+function setViewZoom(value: number): void {
+  viewZoom = Math.max(0.85, Math.min(1.8, Math.round(value * 20) / 20))
+  camera.fov = 72 / viewZoom
+  camera.updateProjectionMatrix()
+  $<HTMLInputElement>('#view-zoom').value = String(viewZoom)
+  $('#view-zoom-label').textContent = `${Math.round(viewZoom * 100)}%`
+}
+
+function setUiScale(value: number): void {
+  uiScale = Math.max(0.9, Math.min(1.3, Math.round(value * 20) / 20))
+  app.style.setProperty('--ui-scale', String(uiScale))
+  app.style.setProperty('--ui-offset', `${Math.round((uiScale - 1) * 95)}px`)
+  $<HTMLInputElement>('#ui-size').value = String(uiScale)
+  $('#ui-size-label').textContent = `${Math.round(uiScale * 100)}%`
+}
+
 function updateLandscapeHint(): void {
   $('#landscape-hint').classList.toggle('hidden', window.innerWidth >= window.innerHeight || !playing || !window.matchMedia('(pointer: coarse)').matches)
 }
@@ -618,6 +651,8 @@ function updateFullscreenButton(): void {
   button.title = active ? '退出全屏' : '全屏游玩'
   button.querySelector('span')!.textContent = active ? '⤢' : '⛶'
   button.querySelector('small')!.textContent = active ? '退出' : '全屏'
+  $('#welcome-fullscreen-button').textContent = active ? '⤢ 退出全屏' : '⛶ 全屏显示'
+  $('#menu-fullscreen-button').textContent = active ? '退出全屏 ⤢' : '全屏显示 ⛶'
   resize()
   updateLandscapeHint()
 }
@@ -643,6 +678,7 @@ async function enterFullscreen(): Promise<void> {
 }
 
 function updateCamera(): void {
+  const cameraDistance = 3.5 / Math.sqrt(viewZoom)
   avatar.position.set(player.x, player.foot, player.z)
   formGroup.position.set(player.x, player.foot - (crouching ? 0.25 : 0), player.z)
   formGroup.rotation.y = player.yaw
@@ -652,13 +688,13 @@ function updateCamera(): void {
   avatar.rotation.x = emoteUntil > performance.now() ? Math.cos(performance.now() * 0.003 * (1 + emoteIndex % 3)) * (0.08 + emoteIndex % 7 * 0.035) : 0
   avatar.visible = thirdPerson && !transform && !itemForm && skinShape !== 'air'
   if (cameraMode === 2) {
-    camera.position.set(player.x - Math.sin(player.yaw) * 3.5, player.foot + (crouching ? 1.4 : 1.85), player.z - Math.cos(player.yaw) * 3.5)
+    camera.position.set(player.x - Math.sin(player.yaw) * cameraDistance, player.foot + (crouching ? 1.4 : 1.85), player.z - Math.cos(player.yaw) * cameraDistance)
     camera.lookAt(player.x, player.foot + 1.1, player.z)
   } else if (thirdPerson) {
     camera.position.set(
-      player.x + Math.sin(player.yaw) * 3.5,
+      player.x + Math.sin(player.yaw) * cameraDistance,
       player.foot + (crouching ? 2.05 : 2.5) + Math.sin(player.pitch) * 1.1,
-      player.z + Math.cos(player.yaw) * 3.5,
+      player.z + Math.cos(player.yaw) * cameraDistance,
     )
     camera.rotation.set(player.pitch, player.yaw, 0)
   } else {
@@ -1400,6 +1436,8 @@ function closePanels(): void {
   panelOpen = false
 }
 
+setViewZoom(viewZoom)
+setUiScale(uiScale)
 renderHotbar()
 updateStatus()
 applySkin()
@@ -1447,10 +1485,13 @@ $('#start-button').addEventListener('click', () => {
   void enterFullscreen()
 })
 $('#welcome-skin-button').addEventListener('click', () => openPanel('#skin-panel'))
-$('#fullscreen-button').addEventListener('click', () => {
+function toggleFullscreen(): void {
   if (document.fullscreenElement === app) void document.exitFullscreen().catch(() => showToast('无法退出全屏'))
   else void enterFullscreen()
-})
+}
+$('#welcome-fullscreen-button').addEventListener('click', toggleFullscreen)
+$('#fullscreen-button').addEventListener('click', toggleFullscreen)
+$('#menu-fullscreen-button').addEventListener('click', toggleFullscreen)
 document.addEventListener('fullscreenchange', updateFullscreenButton)
 $('#menu-button').addEventListener('click', () => openPanel('#menu-panel'))
 $('#command-button').addEventListener('click', () => openPanel('#command-panel'))
@@ -1742,6 +1783,10 @@ $('#camera-button').addEventListener('click', () => {
   updateStatus()
   showToast(`已切换${['第一人称', '第三人称', '前置视角'][cameraMode]}`)
 })
+$<HTMLInputElement>('#view-zoom').addEventListener('input', (event) => setViewZoom(Number((event.target as HTMLInputElement).value)))
+$<HTMLInputElement>('#view-zoom').addEventListener('change', saveWorld)
+$<HTMLInputElement>('#ui-size').addEventListener('input', (event) => setUiScale(Number((event.target as HTMLInputElement).value)))
+$<HTMLInputElement>('#ui-size').addEventListener('change', saveWorld)
 $('#flight-button').addEventListener('click', () => {
   if (mode !== 'creative' && mode !== 'spectator') return showToast('只有创造或旁观者模式可以飞行')
   flying = !flying
@@ -1857,14 +1902,39 @@ joystick.addEventListener('pointercancel', releaseJoystick)
 let lookPointer: number | null = null
 let previousX = 0
 let previousY = 0
+const lookTouches = new Map<number, { x: number; y: number }>()
+let pinchStartDistance = 0
+let pinchStartZoom = viewZoom
+let pinchStartUi = uiScale
 renderer.domElement.addEventListener('pointerdown', (event) => {
-  if (!playing || panelOpen || event.clientX < window.innerWidth * 0.28) return
-  lookPointer = event.pointerId
-  previousX = event.clientX
-  previousY = event.clientY
+  if (!playing || panelOpen || lookTouches.size >= 2 || event.clientX < window.innerWidth * 0.28 && lookTouches.size === 0) return
+  lookTouches.set(event.pointerId, { x: event.clientX, y: event.clientY })
   renderer.domElement.setPointerCapture(event.pointerId)
+  if (lookTouches.size === 1) {
+    lookPointer = event.pointerId
+    previousX = event.clientX
+    previousY = event.clientY
+  } else if (lookTouches.size === 2) {
+    const [a, b] = [...lookTouches.values()]
+    pinchStartDistance = Math.hypot(a.x - b.x, a.y - b.y)
+    pinchStartZoom = viewZoom
+    pinchStartUi = uiScale
+    lookPointer = null
+  }
 })
 renderer.domElement.addEventListener('pointermove', (event) => {
+  if (!lookTouches.has(event.pointerId)) return
+  lookTouches.set(event.pointerId, { x: event.clientX, y: event.clientY })
+  if (lookTouches.size >= 2) {
+    const [a, b] = [...lookTouches.values()]
+    const distance = Math.hypot(a.x - b.x, a.y - b.y)
+    if (pinchStartDistance > 8) {
+      const ratio = distance / pinchStartDistance
+      setViewZoom(pinchStartZoom * ratio)
+      setUiScale(pinchStartUi * Math.pow(ratio, 0.35))
+    }
+    return
+  }
   if (lookPointer !== event.pointerId) return
   player.yaw -= (event.clientX - previousX) * 0.0045
   player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - (event.clientY - previousY) * 0.0045))
@@ -1872,7 +1942,20 @@ renderer.domElement.addEventListener('pointermove', (event) => {
   previousY = event.clientY
 })
 function stopLook(event: PointerEvent): void {
-  if (lookPointer === event.pointerId) lookPointer = null
+  if (!lookTouches.has(event.pointerId)) return
+  const pinching = lookTouches.size >= 2
+  lookTouches.delete(event.pointerId)
+  if (lookTouches.size === 1) {
+    const [id, point] = [...lookTouches.entries()][0]
+    lookPointer = id
+    previousX = point.x
+    previousY = point.y
+  } else lookPointer = null
+  pinchStartDistance = 0
+  if (pinching) {
+    saveWorld()
+    showToast(`画面 ${Math.round(viewZoom * 100)}% · 按钮 ${Math.round(uiScale * 100)}%`)
+  }
 }
 renderer.domElement.addEventListener('pointerup', stopLook)
 renderer.domElement.addEventListener('pointercancel', stopLook)
