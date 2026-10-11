@@ -19,6 +19,10 @@ export const BLOCKS: BlockInfo[] = [
   { id: 'stone_bricks', name: '石砖', english: 'stone bricks', color: '#a2a09c' },
   { id: 'end_portal_frame', name: '末地传送门框架', english: 'end portal frame', color: '#5a8b79' },
   { id: 'purpur_block', name: '紫珀块', english: 'purpur block', color: '#b98dbd' },
+  ...(['east', 'west', 'north', 'south'] as const).flatMap((direction) => [
+    { id: `painting_${direction}`, name: '画', english: 'painting', color: '#a67251' },
+    { id: `item_frame_${direction}`, name: '物品展示框', english: 'item frame', color: '#ad824d' },
+  ]),
 ]
 
 export type BlockId = string
@@ -179,8 +183,37 @@ export class VoxelWorld {
     const normals: number[] = []
     const indices: number[] = []
 
+    const addDecorQuad = (x: number, y: number, z: number, direction: string,
+      size: number, offset: number, color: string): void => {
+      const tint = new THREE.Color(color)
+      const edge = (1 - size) / 2
+      const vertex = positions.length / 3
+      const corners = [[edge, edge], [1 - edge, edge], [1 - edge, 1 - edge], [edge, 1 - edge]]
+      for (const [u, v] of corners) {
+        if (direction === 'east' || direction === 'west') {
+          positions.push(x + (direction === 'east' ? offset : 1 - offset), y + v, z + u)
+          normals.push(direction === 'east' ? 1 : -1, 0, 0)
+        } else {
+          positions.push(x + u, y + v, z + (direction === 'south' ? offset : 1 - offset))
+          normals.push(0, 0, direction === 'south' ? 1 : -1)
+        }
+        colors.push(tint.r, tint.g, tint.b)
+      }
+      if (direction === 'east' || direction === 'north') indices.push(vertex, vertex + 2, vertex + 1, vertex, vertex + 3, vertex + 2)
+      else indices.push(vertex, vertex + 1, vertex + 2, vertex, vertex + 2, vertex + 3)
+    }
+
     for (const [id, type] of this.blocks) {
       const [x, y, z] = id.split(',').map(Number)
+      if (type.startsWith('painting_') || type.startsWith('item_frame_')) {
+        const direction = type.slice(type.startsWith('painting_') ? 9 : 11)
+        const painting = type.startsWith('painting_')
+        addDecorQuad(x, y, z, direction, painting ? 0.94 : 0.84, 0.035, '#5d402d')
+        addDecorQuad(x, y, z, direction, painting ? 0.84 : 0.68, 0.048, painting ? '#e0c7a3' : '#b88955')
+        addDecorQuad(x, y, z, direction, painting ? 0.73 : 0.42, 0.061, painting ? '#6c9e9e' : '#dfcf9c')
+        if (painting) addDecorQuad(x, y, z, direction, 0.3, 0.068, '#e6ac77')
+        continue
+      }
       const baseColor = blockColor.get(type) ?? new THREE.Color('#c4a9cb')
       for (const face of faces) {
         const [dx, dy, dz] = face.direction

@@ -13,6 +13,8 @@ const blockItems: Record<BlockId, ItemId> = {
   netherrack: 'netherrack', nether_bricks: 'nether_bricks', blackstone: 'blackstone',
   soul_sand: 'soul_sand', end_stone: 'end_stone', obsidian: 'obsidian',
   stone_bricks: 'stone_bricks', end_portal_frame: 'end_portal_frame', purpur_block: 'purpur_block',
+  painting_east: 'painting', painting_west: 'painting', painting_north: 'painting', painting_south: 'painting',
+  item_frame_east: 'item_frame', item_frame_west: 'item_frame', item_frame_north: 'item_frame', item_frame_south: 'item_frame',
 }
 const placeableItems = Object.fromEntries(Object.entries(blockItems).map(([block, item]) => [item, block])) as Record<string, BlockId>
 type GameMode = 'survival' | 'creative' | 'adventure' | 'spectator' | 'hardcore'
@@ -951,9 +953,13 @@ function place(): void {
   }
   if (mode === 'spectator' || mode === 'adventure') return showToast('当前模式不能放置方块')
   if (!currentTarget) return showToast('请先用准星对准方块')
-  const id = placeableItems[slot.id]
-  if (!id) return showToast('这个物品不能直接放置')
   const { x, y, z, nx, ny, nz } = currentTarget
+  let id = placeableItems[slot.id]
+  if (slot.id === 'painting' || slot.id === 'item_frame') {
+    if (ny !== 0) return showToast('画和展示框只能挂在墙面上')
+    id = `${slot.id}_${nx > 0 ? 'east' : nx < 0 ? 'west' : nz > 0 ? 'south' : 'north'}`
+  }
+  if (!id) return showToast('这个物品不能直接放置')
   const px = x + nx
   const py = y + ny
   const pz = z + nz
@@ -974,7 +980,8 @@ function collides(x: number, z: number, foot: number): boolean {
   for (const dx of [-0.28, 0.28]) {
     for (const dz of [-0.28, 0.28]) {
       for (const dy of [0.15, 0.9, 1.5]) {
-        if (world.getBlock(Math.floor(x + dx), Math.floor(foot + dy), Math.floor(z + dz))) return true
+        const block = world.getBlock(Math.floor(x + dx), Math.floor(foot + dy), Math.floor(z + dz))
+        if (block && !block.startsWith('painting_') && !block.startsWith('item_frame_')) return true
       }
     }
   }
