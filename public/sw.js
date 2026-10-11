@@ -31,7 +31,18 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || url.origin !== self.location.origin || !staticPath) return
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME)
-    const cached = await cache.match(request.mode === 'navigate' ? SHELL_URL : request)
+    if (request.mode === 'navigate') {
+      try {
+        const response = await fetch(request)
+        if (response.ok) await cache.put(SHELL_URL, response.clone())
+        return response
+      } catch {
+        const cachedPage = await cache.match(SHELL_URL)
+        if (cachedPage) return cachedPage
+        throw new Error('Offline game shell unavailable')
+      }
+    }
+    const cached = await cache.match(request)
     if (cached) return cached
     const response = await fetch(request)
     if (response.ok) await cache.put(request, response.clone())

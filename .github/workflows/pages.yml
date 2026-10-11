@@ -38,12 +38,12 @@ jobs:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           for attempt in $(seq 1 12); do
-            if curl -fsSL --max-time 15 "$PAGE_URL" -o /tmp/game-page.html && grep -q '超级好玩的小世界' /tmp/game-page.html; then
+            if curl -fsSL --max-time 15 "$PAGE_URL" -o /tmp/game-page.html && grep -q '<title>我的世界</title>' /tmp/game-page.html; then
               break
             fi
             sleep 5
           done
-          grep -q '超级好玩的小世界' /tmp/game-page.html
+          grep -q '<title>我的世界</title>' /tmp/game-page.html
           script=$(grep -oE 'src="\./assets/[^\"]+\.js"' /tmp/game-page.html | head -1 | cut -d '"' -f 2)
           test -n "$script"
           curl -fsSL --max-time 15 -o /dev/null "${PAGE_URL%/}/${script#./}"
