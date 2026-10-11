@@ -85,7 +85,7 @@ export class EntityManager {
     return mob
   }
 
-  target(camera: THREE.Camera): Mob | null {
+  target(camera: THREE.Camera): { mob: Mob; distance: number } | null {
     const ray = new THREE.Raycaster()
     ray.far = 7
     ray.setFromCamera(new THREE.Vector2(0, 0), camera)
@@ -93,7 +93,8 @@ export class EntityManager {
     if (!hit) return null
     let object: THREE.Object3D | null = hit.object
     while (object && object.userData.mobId === undefined) object = object.parent
-    return this.mobs.find((mob) => mob.id === object?.userData.mobId) ?? null
+    const mob = this.mobs.find((candidate) => candidate.id === object?.userData.mobId)
+    return mob ? { mob, distance: hit.distance } : null
   }
 
   hit(mob: Mob, damage: number): boolean {

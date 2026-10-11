@@ -1,11 +1,11 @@
 # Third party data
 
-`src/data/items.json`, `src/data/recipes.json`, and `src/data/blocks.json` were generated from the
-Minecraft 1.21.4 item and crafting data maintained by
+`src/data/items.json`, `src/data/recipes.json`, `src/data/blocks.json`, and `src/data/mining.json` were generated from the
+Minecraft Java 26.1 item, block, and crafting data maintained by
 [PrismarineJS/minecraft-data](https://github.com/PrismarineJS/minecraft-data)
-(MIT license). Chinese item display names were matched against the 1.21.4
+(MIT license), package version 3.117.0. Existing Chinese item names were matched against the 1.21.4
 Simplified Chinese language data in
-[InventivetalentDev/minecraft-assets](https://github.com/InventivetalentDev/minecraft-assets).
+[InventivetalentDev/minecraft-assets](https://github.com/InventivetalentDev/minecraft-assets); names for newly added 26.1 items are maintained in the update script.
 
 This project generates its own pixel textures and uses original geometric models.
 It does not include Minecraft textures, sounds, or character artwork. Minecraft is a trademark

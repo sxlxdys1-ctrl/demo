@@ -156,25 +156,39 @@ export class VoxelWorld {
         const wave = Math.sin(x * 0.27) * 0.8 + Math.cos(z * 0.24) * 0.75
         const height = nearSpawn ? 3 : Math.max(1, Math.min(6, Math.floor(3.2 + wave + hash(x, z) * 0.8)))
         for (let y = 0; y <= height; y++) {
-          const type: BlockId = this.dimension === 'nether'
+          let type: BlockId = this.dimension === 'nether'
             ? y === height && hash(x * 7, z * 3) > 0.92 ? 'soul_sand' : y < height - 2 ? 'blackstone' : 'netherrack'
             : this.dimension === 'end' || this.dimension === 'end_city' ? 'end_stone'
               : y === height ? (height <= 2 ? 'sand' : 'grass') : y >= height - 2 ? 'dirt' : 'stone'
+          if (this.dimension === 'overworld' && type === 'stone') {
+            const ore = hash(x * 19 + y * 31, z * 23 - y * 17)
+            type = ore > 0.992 ? 'diamond_ore' : ore > 0.98 ? 'gold_ore'
+              : ore > 0.954 ? 'iron_ore' : ore > 0.925 ? 'copper_ore'
+                : ore > 0.89 ? 'coal_ore' : 'stone'
+          } else if (this.dimension === 'nether' && y < height) {
+            const ore = hash(x * 17 + y * 37, z * 29 - y * 13)
+            type = ore > 0.995 && y <= 2 ? 'ancient_debris'
+              : ore > 0.96 ? 'nether_gold_ore' : ore > 0.91 ? 'nether_quartz_ore' : type
+          }
           this.blocks.set(key(x, y, z), type)
         }
         if (this.dimension === 'overworld' && !nearSpawn && height >= 3 && hash(x * 3, z * 7) > 0.994) {
-          for (let y = height + 1; y <= height + 3; y++) this.blocks.set(key(x, y, z), 'wood')
+          const log = x > 8 ? 'pale_oak_log' : 'wood'
+          const leaves = x > 8 ? 'pale_oak_leaves' : 'leaves'
+          for (let y = height + 1; y <= height + 3; y++) this.blocks.set(key(x, y, z), log)
           for (let dx = -1; dx <= 1; dx++) {
             for (let dz = -1; dz <= 1; dz++) {
               for (let dy = 2; dy <= 3; dy++) {
                 if (Math.abs(dx) + Math.abs(dz) + (dy === 3 ? 1 : 0) <= 2) {
-                  this.blocks.set(key(x + dx, height + dy, z + dz), 'leaves')
+                  this.blocks.set(key(x + dx, height + dy, z + dz), leaves)
                 }
               }
             }
           }
-          this.blocks.set(key(x, height + 4, z), 'leaves')
+          this.blocks.set(key(x, height + 4, z), leaves)
         }
+        if (this.dimension === 'overworld' && !nearSpawn && height >= 3 && hash(x * 13, z * 11) > 0.978) this.blocks.set(key(x, height + 1, z), x > 8 ? 'firefly_bush' : 'leaf_litter')
+        if (this.dimension === 'end_city' && !nearSpawn && hash(x * 11, z * 17) > 0.988) this.blocks.set(key(x, height + 1, z), 'chorus_flower')
       }
     }
     if (this.dimension === 'nether') {

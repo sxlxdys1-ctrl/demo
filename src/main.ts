@@ -2,8 +2,10 @@ import * as THREE from 'three'
 import { BLOCKS, registerCatalogBlock, registerCustomBlock, type BlockId, type Dimension, VoxelWorld } from './world'
 import { EntityManager, makeMob, mobInfo, type Mob, type MobKind } from './entities'
 import { OnlineClient, type OnlineFriend, type OnlineWorld, type WorkshopProduct } from './online'
-import { addItem, allItems, canCraft, craft, countItem, emptyInventory, HOTBAR_SIZE, itemInfo, matchingRecipe, normalizeInventory, recipeFits, recipes, recipeNeeds, recipeSize, searchItems, takeItem, type Inventory, type ItemId } from './systems'
+import { addItem, allItems, canCraft, craft, countItem, durabilityLeft, emptyInventory, HOTBAR_SIZE, itemInfo, matchingRecipe, normalizeInventory, recipeFits, recipes, recipeNeeds, recipeSize, searchItems, takeItem, toolKind, wearTool, type Inventory, type ItemId } from './systems'
 import catalogBlocks from './data/blocks.json'
+import miningData from './data/mining.json'
+import minecraftVersion from './data/version.json'
 import { iconUrl } from './icons'
 import './style.css'
 
@@ -20,6 +22,15 @@ const blockItems: Record<BlockId, ItemId> = {
   item_frame_east: 'item_frame', item_frame_west: 'item_frame', item_frame_north: 'item_frame', item_frame_south: 'item_frame',
 }
 const placeableItems = Object.fromEntries(Object.entries(blockItems).map(([block, item]) => [item, block])) as Record<string, BlockId>
+type MiningInfo = { tool?: string; tier?: number; drops: string[]; diggable: boolean }
+const miningRules = miningData as Record<string, MiningInfo>
+const blockAliases: Record<string, string> = { grass: 'grass_block', wood: 'oak_log', leaves: 'oak_leaves', brick: 'bricks' }
+const pickaxeTiers: Record<string, number> = {
+  wooden_pickaxe: 1, golden_pickaxe: 1, stone_pickaxe: 2, copper_pickaxe: 2,
+  iron_pickaxe: 3, diamond_pickaxe: 4, netherite_pickaxe: 5, endless_pickaxe: 6,
+}
+const pickaxeTierNames = ['', '木/金', '石/铜', '铁', '钻石', '下界合金']
+function miningInfo(id: BlockId): MiningInfo | undefined { return miningRules[blockAliases[id] ?? id] }
 for (const id of catalogBlocks) {
   if (!allItems[id]) continue
   registerCatalogBlock(id, itemInfo(id).zh)
@@ -82,9 +93,10 @@ app.innerHTML = `
   </div>
   <div id="menu-panel" class="overlay panel-overlay hidden" role="dialog" aria-modal="true" aria-label="游戏菜单">
     <div class="panel menu-panel">
-      <div class="panel-heading"><div><div class="eyebrow">休息一下</div><h2>游戏菜单</h2></div><button class="close-button" data-close aria-label="关闭菜单">×</button></div>
+      <div class="panel-heading"><div><div class="eyebrow">休息一下</div><h2>游戏菜单 <span>Java ${minecraftVersion.version} 数据</span></h2></div><button class="close-button" data-close aria-label="关闭菜单">×</button></div>
       <p class="panel-hint">左侧摇杆移动；在右侧空白处滑动可转动视角。准星对准方块后点击挖掘或放置。</p>
       <button id="craft-button" class="menu-option">工作台与合成 <span>▦</span></button>
+      <button id="forge-button" class="menu-option">熔炉与锻造 <span>♨</span></button>
       <button id="journey-button" class="menu-option">世界旅程 <span>✦</span></button>
       <button id="mode-button" class="menu-option">游戏模式 <span id="mode-label">生存</span></button>
       <button id="camera-button" class="menu-option">切换视角 <span id="camera-label">第一人称</span></button>
@@ -118,6 +130,13 @@ app.innerHTML = `
       <div class="craft-workspace"><div id="craft-grid" class="craft-grid"></div><div class="craft-result"><span id="craft-result-label">选择材料填入格子</span><button id="craft-grid-make" class="primary-button" disabled>合成</button><button id="craft-grid-clear" class="menu-option">清空格子</button></div></div>
       <input id="recipe-search" class="search-input" type="search" placeholder="搜索合成物品 / English" aria-label="搜索合成物品" />
       <div id="recipe-list" class="recipe-list"></div>
+    </div>
+  </div>
+  <div id="forge-panel" class="overlay panel-overlay hidden" role="dialog" aria-modal="true" aria-label="熔炉与锻造">
+    <div class="panel menu-panel">
+      <div class="panel-heading"><div><div class="eyebrow">矿石 · 燃料 · 合金</div><h2>熔炉与锻造</h2></div><button class="close-button" data-close aria-label="关闭熔炉与锻造">×</button></div>
+      <p id="forge-status" class="panel-hint"></p>
+      <div id="forge-list" class="recipe-list"></div>
     </div>
   </div>
   <div id="mob-panel" class="overlay panel-overlay hidden" role="dialog" aria-modal="true" aria-label="生物变身">
@@ -263,6 +282,7 @@ type SaveData = {
   editsByDimension: Partial<Record<Dimension, [string, BlockId | null][]>>
   strongholdLocated: boolean
   dragonDefeated: boolean
+  bastionLooted?: boolean
   coins: number
   skinPixels: string[]
   skinShape: 'normal' | 'item' | 'air'
@@ -306,6 +326,7 @@ function readSave(): SaveData | null {
       editsByDimension: save.editsByDimension && typeof save.editsByDimension === 'object' ? save.editsByDimension : { overworld: save.edits },
       strongholdLocated: !!save.strongholdLocated,
       dragonDefeated: !!save.dragonDefeated,
+      bastionLooted: !!save.bastionLooted,
       coins: Number.isSafeInteger(save.coins) ? Math.max(0, save.coins) : 0,
       skinPixels: Array.isArray(save.skinPixels) && save.skinPixels.length === 64
         ? save.skinPixels.map((color) => typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#71a7bd')
@@ -389,6 +410,7 @@ let benchSize = saved?.benchSize ?? 9
 let usingWorkbench = false
 let craftChoice: ItemId | null = null
 let craftGrid: (ItemId | null)[] = Array(4).fill(null)
+let chosenRecipe: (typeof recipes)[number] | null = null
 let sleeping = false
 let cameraMode: 0 | 1 | 2 = 0
 const unlockedMobs = new Set<MobKind>(saved?.unlockedMobs ?? [])
@@ -399,6 +421,7 @@ let crouching = false
 const editsByDimension: Partial<Record<Dimension, [string, BlockId | null][]>> = saved?.editsByDimension ?? {}
 let strongholdLocated = saved?.strongholdLocated ?? false
 let dragonDefeated = saved?.dragonDefeated ?? false
+let bastionLooted = saved?.bastionLooted ?? false
 let coins = saved?.coins ?? 0
 let skinPixels = saved?.skinPixels ?? Array(64).fill('#71a7bd') as string[]
 let skinShape: 'normal' | 'item' | 'air' = saved?.skinShape ?? 'normal'
@@ -442,6 +465,14 @@ function swatch(id: ItemId): string {
   return `<span class="block-swatch" style="background-image:url(${iconUrl(id, block?.color)})"></span>`
 }
 
+function durabilityBadge(slot: NonNullable<Inventory[number]>): string {
+  const left = durabilityLeft(slot)
+  const max = itemInfo(slot.id).maxDurability
+  if (left === null || !max) return ''
+  const percent = Math.max(0, Math.round(left / max * 100))
+  return `<span class="durability-bar" title="耐久 ${left}/${max}"><i style="width:${percent}%;background:${percent > 40 ? '#77bd74' : percent > 15 ? '#e9bc53' : '#e66e62'}"></i></span>`
+}
+
 function updateFormAppearance(): void {
   formGroup.clear()
   if (transform) formGroup.add(makeMob(transform))
@@ -482,8 +513,8 @@ updateFormAppearance()
 
 function renderHotbar(): void {
   hotbar.innerHTML = inventory.slice(0, HOTBAR_SIZE).map((slot, index) => `
-    <button class="hotbar-slot ${index === selectedIndex ? 'selected' : ''}" data-slot="${index}" aria-label="快捷栏 ${index + 1}${slot ? `，${itemInfo(slot.id).zh} ${slot.count} 个` : '，空'}" aria-pressed="${index === selectedIndex}">
-      ${slot ? swatch(slot.id) : '<span class="empty-swatch">＋</span>'}<span class="slot-number">${slot?.count ?? index + 1}</span>
+    <button class="hotbar-slot ${index === selectedIndex ? 'selected' : ''}" data-slot="${index}" aria-label="快捷栏 ${index + 1}${slot ? `，${itemInfo(slot.id).zh} ${slot.count} 个${durabilityLeft(slot) === null ? '' : `，剩余耐久 ${durabilityLeft(slot)}`}` : '，空'}" aria-pressed="${index === selectedIndex}">
+      ${slot ? swatch(slot.id) : '<span class="empty-swatch">＋</span>'}<span class="slot-number">${slot ? durabilityLeft(slot) === null ? slot.count : '' : index + 1}</span>${slot ? durabilityBadge(slot) : ''}
     </button>
   `).join('')
   const held = inventory[selectedIndex]?.id
@@ -503,8 +534,8 @@ function renderCatalog(): void {
 
 function renderInventory(): void {
   inventoryGrid.innerHTML = inventory.map((slot, index) => `
-    <button class="inventory-slot ${index < HOTBAR_SIZE ? 'quick-slot' : ''} ${inventorySelection === index ? 'selected' : ''}" data-inventory-slot="${index}" aria-label="背包第 ${index + 1} 格${slot ? `，${itemInfo(slot.id).zh} ${slot.count} 个` : '，空'}">
-      ${slot ? swatch(slot.id) : '<span class="slot-placeholder">·</span>'}<span class="inventory-number">${slot?.count ?? index + 1}</span>
+    <button class="inventory-slot ${index < HOTBAR_SIZE ? 'quick-slot' : ''} ${inventorySelection === index ? 'selected' : ''}" data-inventory-slot="${index}" aria-label="背包第 ${index + 1} 格${slot ? `，${itemInfo(slot.id).zh} ${slot.count} 个${durabilityLeft(slot) === null ? '' : `，剩余耐久 ${durabilityLeft(slot)}`}` : '，空'}">
+      ${slot ? swatch(slot.id) : '<span class="slot-placeholder">·</span>'}<span class="inventory-number">${slot ? durabilityLeft(slot) === null ? slot.count : '' : index + 1}</span>${slot ? durabilityBadge(slot) : ''}
     </button>
   `).join('')
 }
@@ -522,17 +553,35 @@ function updateStatus(): void {
   $('#coins-label').textContent = `${coins} ＋`
 }
 
-function workbenchNearby(): boolean {
+function stationNearby(station: BlockId): boolean {
   if (mode === 'creative') return true
   for (let x = Math.floor(player.x) - 4; x <= Math.floor(player.x) + 4; x++) {
     for (let z = Math.floor(player.z) - 4; z <= Math.floor(player.z) + 4; z++) {
       if (Math.hypot(x + 0.5 - player.x, z + 0.5 - player.z) > 4.5) continue
       for (let y = Math.floor(player.foot) - 2; y <= Math.floor(player.foot) + 2; y++) {
-        if (world.getBlock(x, y, z) === 'crafting_table') return true
+        if (world.getBlock(x, y, z) === station) return true
       }
     }
   }
   return false
+}
+
+function workbenchNearby(): boolean { return stationNearby('crafting_table') }
+
+const smeltingRecipes: [ItemId, ItemId][] = [
+  ['raw_iron', 'iron_ingot'], ['raw_copper', 'copper_ingot'], ['raw_gold', 'gold_ingot'],
+  ['ancient_debris', 'netherite_scrap'], ['sand', 'glass'],
+]
+const furnaceFuels = ['coal', 'charcoal', 'oak_log', 'pale_oak_log', 'oak_planks', 'pale_oak_planks']
+function fuelInInventory(): ItemId | undefined { return furnaceFuels.find((id) => countItem(inventory, id) > 0) }
+
+function renderForge(): void {
+  const furnace = stationNearby('furnace')
+  const smithing = stationNearby('smithing_table')
+  $('#forge-status').textContent = `${furnace ? '附近有熔炉' : '先合成并放置熔炉'} · ${smithing ? '附近有锻造台' : '先合成并放置锻造台'}。熔炉每次消耗 1 个矿石和 1 个燃料。`
+  $('#forge-list').innerHTML = smeltingRecipes.map(([input, output], index) => `
+    <div class="recipe-card"><div>${swatch(output)}<strong>${itemInfo(input).zh} → ${itemInfo(output).zh}</strong><small>库存 ${countItem(inventory, input)} · 燃料 ${fuelInInventory() ? itemInfo(fuelInInventory()!).zh : '不足'}</small></div><button data-smelt="${index}">烧炼</button></div>
+  `).join('') + `<div class="recipe-card"><div>${swatch('netherite_pickaxe')}<strong>下界合金镐</strong><small>钻石镐 + 下界合金锭 + 下界合金升级锻造模板</small></div><button data-smith="pickaxe">升级</button></div>`
 }
 
 function craftCapacity(): number { return usingWorkbench && workbenchNearby() ? benchSize : 4 }
@@ -546,7 +595,7 @@ function renderCraftGrid(): void {
   $('#craft-materials').innerHTML = supplies.map((slot) => `<button class="craft-material ${craftChoice === slot.id ? 'selected' : ''}" data-craft-material="${slot.id}">${swatch(slot.id)}<span>${itemInfo(slot.id).zh}<small>×${countItem(inventory, slot.id)}</small></span></button>`).join('') || '<span class="panel-hint">先挖木头，随身合成木板。</span>'
   $('#craft-grid').className = `craft-grid width-${width}`
   $('#craft-grid').innerHTML = craftGrid.map((id, index) => `<button class="craft-cell" data-craft-cell="${index}" aria-label="合成格 ${index + 1}${id ? ` ${itemInfo(id).zh}` : ' 空'}">${id ? swatch(id) : '<span>＋</span>'}</button>`).join('')
-  const match = matchingRecipe(craftGrid, width)
+  const match = matchingRecipe(craftGrid, width, chosenRecipe)
   $('#craft-result-label').textContent = match ? `${itemInfo(match.result).zh} ×${match.count}` : '配方未匹配'
   $<HTMLButtonElement>('#craft-grid-make').disabled = !match || !canCraft(inventory, match, craftCapacity())
   $('#craft-mode').textContent = usingWorkbench ? '切换到随身 2×2' : '切换到 3×3 工作台'
@@ -600,6 +649,7 @@ function saveWorld(): void {
     editsByDimension: activeEdits,
     strongholdLocated,
     dragonDefeated,
+    bastionLooted,
     coins,
     skinPixels,
     skinShape,
@@ -719,13 +769,14 @@ let currentMob: Mob | null = null
 function updateTarget(): void {
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera)
   const hit = raycaster.intersectObject(world.mesh, false)[0]
-  const mob = entities.target(camera)
-  if (mob && (!hit || camera.position.distanceTo(mob.group.position) < hit.distance + 1)) {
+  const mobHit = entities.target(camera)
+  if (mobHit && (!hit || mobHit.distance <= hit.distance + 0.02)) {
+    const mob = mobHit.mob
     currentMob = mob
     currentTarget = null
     targetOutline.visible = false
     targetLabel.textContent = `${mobInfo[mob.kind].name} · ♥ ${Math.ceil(mob.health)}`
-    $('#mine-label').textContent = '攻击'
+    $('#mine-label').textContent = ['pistol', 'rifle'].includes(inventory[selectedIndex]?.id ?? '') ? '开火' : '攻击'
     return
   }
   currentMob = null
@@ -750,7 +801,8 @@ function updateTarget(): void {
   currentTarget = { x, y, z, nx: Math.round(nx), ny: Math.round(ny), nz: Math.round(nz), id }
   targetOutline.position.set(x + 0.5, y + 0.5, z + 0.5)
   targetOutline.visible = true
-  targetLabel.textContent = `${BLOCKS.find((item) => item.id === id)!.name} · 可挖掘`
+  const rule = miningInfo(id)
+  targetLabel.textContent = `${BLOCKS.find((item) => item.id === id)!.name} · ${rule?.diggable === false ? '生存模式不可挖' : rule?.tool === 'pickaxe' ? `需${pickaxeTierNames[rule.tier ?? 1] ?? '对应等级'}镐` : '可挖掘'}`
 }
 
 function renderMobs(): void {
@@ -773,7 +825,7 @@ function renderJourney(): void {
   const actions: [string, string][] = world.dimension === 'overworld'
     ? [['nether', '进入下界'], ['locate', '投掷末影之眼，寻找要塞'], ['end', '激活要塞传送门，进入末地'], ...(dragonDefeated ? [['end_city', '通过祭坛前往末地城'] as [string, string]] : [])]
     : world.dimension === 'nether'
-      ? [['trade', '用金锭与猪灵交换末影珍珠'], ['overworld', '返回主世界']]
+      ? [['trade', '用金锭与猪灵交换末影珍珠'], ...(!bastionLooted ? [['bastion', '探索猪灵堡垒，寻找升级锻造模板'] as [string, string]] : []), ['overworld', '返回主世界']]
       : world.dimension === 'end'
         ? [...(dragonDefeated ? [['end_city', '进入末地城'] as [string, string], ['overworld', '经祭坛返回主世界'] as [string, string]] : [['dragon', '挑战末影龙'] as [string, string]])]
         : [['overworld', '返回主世界'], ['end', '返回末地']]
@@ -1155,9 +1207,11 @@ function runChineseCommand(raw: string): string {
 function attackMob(mob: Mob): void {
   if (mode === 'spectator') return showToast('旁观者不能攻击')
   const held = inventory[selectedIndex]?.id
-  const damage = held === 'greedy_sword' ? 40 : held === 'rifle' ? 25 : held === 'pistol' ? 9
+  const damage = held === 'greedy_sword' || held === 'endless_sword' ? 40 : held === 'rifle' ? 25 : held === 'pistol' ? 9
     : held?.endsWith('_sword') ? held.includes('diamond') || held.includes('netherite') ? 9 : 5 : 2
   const defeated = entities.hit(mob, damage)
+  const broken = mode !== 'creative' && !!held && wearTool(inventory, selectedIndex, toolKind(held) === 'sword' ? 1 : 2)
+  if (held && !['pistol', 'rifle'].includes(held)) renderHotbar()
   if (defeated) {
     if (mob.kind === 'ender_dragon') dragonDefeated = true
     unlockedMobs.add(mob.kind)
@@ -1169,25 +1223,47 @@ function attackMob(mob: Mob): void {
     renderHotbar()
     updateStatus()
     saveWorld()
-    showToast(`击败${mobInfo[mob.kind].name}，已解锁变身`)
-  } else showToast(`命中${mobInfo[mob.kind].name} · ${damage} 点伤害`)
+    showToast(`击败${mobInfo[mob.kind].name}，已解锁变身${broken ? '；工具已损坏' : ''}`)
+  } else showToast(`命中${mobInfo[mob.kind].name} · ${damage} 点伤害${broken ? '；工具已损坏' : ''}`)
+  saveWorld()
 }
 
 function mine(): void {
   if (!playing || panelOpen) return
   if (currentMob) return attackMob(currentMob)
   if (mode === 'spectator' || mode === 'adventure') return showToast('当前模式不能挖掘方块')
+  const held = inventory[selectedIndex]?.id
+  if (held && (toolKind(held) === 'sword' || held === 'pistol' || held === 'rifle')) return showToast('请先用准星对准生物再攻击')
   if (!currentTarget) return showToast('请先用准星对准方块')
   const { x, y, z, id } = currentTarget
-  if (mode !== 'creative' && !inventory.some((slot) => slot === null || slot.id === blockItems[id] && slot.count < itemInfo(slot.id).stack)) {
-    return showToast('背包已满')
+  const required = miningInfo(id)
+  if (mode !== 'creative' && required?.diggable === false) return showToast('这个方块无法在生存模式挖掘')
+  if (mode !== 'creative' && required?.tool === 'pickaxe' && (toolKind(held ?? '') !== 'pickaxe' || (pickaxeTiers[held ?? ''] ?? 0) < (required.tier ?? 1))) {
+    const broken = wearTool(inventory, selectedIndex, 2)
+    if (held) { renderHotbar(); saveWorld() }
+    return showToast(`需要${pickaxeTierNames[required.tier ?? 1] ?? '对应等级'}镐或更高等级${broken ? '；当前工具已损坏' : ''}`)
   }
   let removed = 0
+  let broken = false
   for (const [bx, by, bz] of ownedMods.has('excavator') ? [[x, y, z], [x - 1, y, z], [x + 1, y, z]] : [[x, y, z]]) {
     const type = world.getBlock(bx, by, bz)
+    const rule = type ? miningInfo(type) : undefined
+    if (mode !== 'creative' && (rule?.diggable === false || rule?.tool === 'pickaxe' && (toolKind(inventory[selectedIndex]?.id ?? '') !== 'pickaxe' || (pickaxeTiers[inventory[selectedIndex]?.id ?? ''] ?? 0) < (rule.tier ?? 1)))) continue
+    const drops = type ? (rule ? rule.drops : [blockItems[type] ?? type]).filter((drop) => !!allItems[drop]) : []
+    if (mode !== 'creative') {
+      const test = inventory.map((slot) => slot ? { ...slot } : null)
+      if (drops.some((drop) => addItem(test, drop, ownedMods.has('double_loot') ? 2 : 1) > 0)) {
+        if (!removed) showToast('背包已满')
+        break
+      }
+    }
     if (!type || !world.setBlock(bx, by, bz, null)) continue
     if (onlineWorldId) online.send({ type: 'edit', dimension: world.dimension, x: bx, y: by, z: bz, blockId: null })
-    if (mode !== 'creative') addItem(inventory, blockItems[type], ownedMods.has('double_loot') ? 2 : 1)
+    if (mode !== 'creative') {
+      for (const drop of drops) addItem(inventory, drop, ownedMods.has('double_loot') ? 2 : 1)
+      const activeTool = inventory[selectedIndex]?.id
+      if (activeTool) broken = wearTool(inventory, selectedIndex, toolKind(activeTool) === rule?.tool ? 1 : 2) || broken
+    }
     removed++
     mined++
     experience += 1
@@ -1195,7 +1271,8 @@ function mine(): void {
   }
   if (removed > 0) {
     $('#mine-count').textContent = `已挖掘 ${mined} 块`
-    showToast(`获得了${BLOCKS.find((item) => item.id === id)!.name}${removed > 1 ? `等 ${removed} 块` : ''}`)
+    const firstDrop = (miningInfo(id)?.drops ?? [blockItems[id]])[0]
+    showToast(`挖掘了${BLOCKS.find((item) => item.id === id)!.name}${removed > 1 ? `等 ${removed} 块` : ''}${mode !== 'creative' && firstDrop ? `，得到${itemInfo(firstDrop).zh}` : ''}${broken ? '；工具已损坏' : ''}`)
     renderHotbar()
     updateStatus()
     saveWorld()
@@ -1279,7 +1356,9 @@ function place(): void {
       }
     }
     window.setTimeout(() => { if (world.getBlock(bx, by, bz) === 'fire') world.setBlock(bx, by, bz, null); saveWorld() }, 10000)
-    showToast('方块着火了，火焰会造成伤害')
+    const broken = mode !== 'creative' && wearTool(inventory, selectedIndex, 1)
+    renderHotbar()
+    showToast(`方块着火了，火焰会造成伤害${broken ? '；打火石已损坏' : ''}`)
     saveWorld()
     return
   }
@@ -1411,6 +1490,7 @@ function openPanel(selector: string): void {
   $(selector).classList.remove('hidden')
   if (selector === '#inventory-panel') { renderCatalog(); renderInventory() }
   if (selector === '#craft-panel') { renderCraftGrid(); renderRecipes() }
+  if (selector === '#forge-panel') renderForge()
   if (selector === '#mob-panel') renderMobs()
   if (selector === '#journey-panel') renderJourney()
   if (selector === '#skin-panel') renderSkinGrid()
@@ -1425,6 +1505,7 @@ function closePanels(): void {
   $('#inventory-panel').classList.add('hidden')
   $('#menu-panel').classList.add('hidden')
   $('#craft-panel').classList.add('hidden')
+  $('#forge-panel').classList.add('hidden')
   $('#mob-panel').classList.add('hidden')
   $('#journey-panel').classList.add('hidden')
   $('#skin-panel').classList.add('hidden')
@@ -1559,6 +1640,7 @@ $('#morph-items').addEventListener('click', (event) => {
   saveWorld(); closePanels(); showToast(`已变成${itemInfo(id).zh}`)
 })
 $('#craft-button').addEventListener('click', () => { closePanels(); openPanel('#craft-panel') })
+$('#forge-button').addEventListener('click', () => { closePanels(); openPanel('#forge-panel') })
 $('#journey-button').addEventListener('click', () => { closePanels(); openPanel('#journey-panel') })
 $('#coins-button').addEventListener('click', async () => {
   try {
@@ -1750,6 +1832,13 @@ $('#journey-actions').addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-journey]')
   if (!button) return
   const action = button.dataset.journey
+  if (action === 'bastion') {
+    if (world.dimension !== 'nether' || Math.hypot(player.x + 12, player.z + 8) > 5) return showToast('先到下界猪灵堡垒 x=-12、z=-8')
+    if (bastionLooted) return showToast('这里的锻造模板已经领取')
+    if (addItem(inventory, 'netherite_upgrade_smithing_template', 1)) return showToast('背包已满')
+    bastionLooted = true
+    renderJourney(); renderHotbar(); saveWorld(); return showToast('找到了下界合金升级锻造模板')
+  }
   if (action === 'trade') {
     if (mode !== 'creative' && !takeItem(inventory, 'gold_ingot', 1)) return showToast('需要 1 个金锭')
     addItem(inventory, 'ender_pearl', 1)
@@ -1816,15 +1905,53 @@ $('#craft-grid').addEventListener('click', (event) => {
   else if (craftChoice && craftGrid.filter((id) => id === craftChoice).length < countItem(inventory, craftChoice)) craftGrid[index] = craftChoice
   else if (prior) craftGrid[index] = null
   else return showToast('先选择背包里的材料')
+  chosenRecipe = null
   renderCraftGrid()
 })
-$('#craft-grid-clear').addEventListener('click', () => { craftGrid.fill(null); renderCraftGrid() })
+$('#craft-grid-clear').addEventListener('click', () => { craftGrid.fill(null); chosenRecipe = null; renderCraftGrid() })
 $('#craft-grid-make').addEventListener('click', () => {
-  const match = matchingRecipe(craftGrid, usingWorkbench ? 3 : 2)
+  const match = matchingRecipe(craftGrid, usingWorkbench ? 3 : 2, chosenRecipe)
   if (!match || !craft(inventory, match, craftCapacity())) return showToast('配方未匹配或材料不足')
   experience += Math.max(1, Math.ceil(recipeSize(match) / 3))
   showToast(`合成了${itemInfo(match.result).zh} ×${match.count}`)
-  craftGrid.fill(null); renderHotbar(); renderCraftGrid(); renderRecipes(); saveWorld()
+  craftGrid.fill(null); chosenRecipe = null; renderHotbar(); renderCraftGrid(); renderRecipes(); saveWorld()
+})
+$('#forge-list').addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-smelt], [data-smith]')
+  if (!button) return
+  if (button.dataset.smelt !== undefined) {
+    if (!stationNearby('furnace')) return showToast('先在附近放置熔炉')
+    const recipe = smeltingRecipes[Number(button.dataset.smelt)]
+    if (!recipe) return
+    const [input, output] = recipe
+    const fuel = fuelInInventory()
+    if (!countItem(inventory, input)) return showToast(`需要${itemInfo(input).zh}`)
+    if (!fuel) return showToast('需要煤炭、木炭或木头作燃料')
+    const test = inventory.map((slot) => slot ? { ...slot } : null)
+    takeItem(test, input, 1)
+    takeItem(test, fuel, 1)
+    if (addItem(test, output, 1)) return showToast('背包已满')
+    takeItem(inventory, input, 1)
+    takeItem(inventory, fuel, 1)
+    addItem(inventory, output, 1)
+    showToast(`烧炼得到${itemInfo(output).zh}`)
+  } else {
+    if (!stationNearby('smithing_table')) return showToast('先在附近放置锻造台')
+    const ingredients = ['diamond_pickaxe', 'netherite_ingot', 'netherite_upgrade_smithing_template']
+    const missing = ingredients.find((id) => countItem(inventory, id) < 1)
+    if (missing) return showToast(`需要${itemInfo(missing).zh}`)
+    const test = inventory.map((slot) => slot ? { ...slot } : null)
+    ingredients.forEach((id) => takeItem(test, id, 1))
+    if (addItem(test, 'netherite_pickaxe', 1)) return showToast('背包已满')
+    const old = inventory.slice().reverse().find((slot) => slot?.id === 'diamond_pickaxe')!
+    const ratio = (durabilityLeft(old) ?? 1561) / 1561
+    ingredients.forEach((id) => takeItem(inventory, id, 1))
+    const empty = inventory.findIndex((slot) => slot === null)
+    addItem(inventory, 'netherite_pickaxe', 1)
+    if (empty >= 0 && inventory[empty]?.id === 'netherite_pickaxe') inventory[empty]!.durability = Math.max(1, Math.round(2031 * ratio))
+    showToast('锻造了下界合金镐')
+  }
+  renderHotbar(); renderForge(); saveWorld()
 })
 $<HTMLInputElement>('#recipe-search').addEventListener('input', renderRecipes)
 $('#recipe-list').addEventListener('click', (event) => {
@@ -1835,6 +1962,7 @@ $('#recipe-list').addEventListener('click', (event) => {
   const width = usingWorkbench ? 3 : 2
   if (recipeFits(recipe, width)) {
     craftGrid = Array(width * width).fill(null)
+    chosenRecipe = recipe
     if (recipe.shape) recipe.shape.forEach((row, y) => row.forEach((id, x) => { craftGrid[y * width + x] = id }))
     else (recipe.ingredients ?? []).forEach((id, index) => { craftGrid[index] = id })
     renderCraftGrid()
