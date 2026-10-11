@@ -1,8 +1,10 @@
 import * as THREE from 'three'
-import { BLOCKS, registerCustomBlock, type BlockId, type Dimension, VoxelWorld } from './world'
-import { EntityManager, mobInfo, type Mob, type MobKind } from './entities'
+import { BLOCKS, registerCatalogBlock, registerCustomBlock, type BlockId, type Dimension, VoxelWorld } from './world'
+import { EntityManager, makeMob, mobInfo, type Mob, type MobKind } from './entities'
 import { OnlineClient, type OnlineFriend, type OnlineWorld, type WorkshopProduct } from './online'
-import { addItem, allItems, canCraft, craft, emptyInventory, itemInfo, normalizeInventory, recipes, recipeNeeds, recipeSize, searchItems, takeItem, type Inventory, type ItemId } from './systems'
+import { addItem, allItems, canCraft, craft, countItem, emptyInventory, HOTBAR_SIZE, itemInfo, matchingRecipe, normalizeInventory, recipeFits, recipes, recipeNeeds, recipeSize, searchItems, takeItem, type Inventory, type ItemId } from './systems'
+import catalogBlocks from './data/blocks.json'
+import { iconUrl } from './icons'
 import './style.css'
 
 const SAVE_KEY = 'tiny-wonder-world-v2'
@@ -13,10 +15,17 @@ const blockItems: Record<BlockId, ItemId> = {
   netherrack: 'netherrack', nether_bricks: 'nether_bricks', blackstone: 'blackstone',
   soul_sand: 'soul_sand', end_stone: 'end_stone', obsidian: 'obsidian',
   stone_bricks: 'stone_bricks', end_portal_frame: 'end_portal_frame', purpur_block: 'purpur_block',
+  crafting_table: 'crafting_table', fire: 'fire',
   painting_east: 'painting', painting_west: 'painting', painting_north: 'painting', painting_south: 'painting',
   item_frame_east: 'item_frame', item_frame_west: 'item_frame', item_frame_north: 'item_frame', item_frame_south: 'item_frame',
 }
 const placeableItems = Object.fromEntries(Object.entries(blockItems).map(([block, item]) => [item, block])) as Record<string, BlockId>
+for (const id of catalogBlocks) {
+  if (!allItems[id]) continue
+  registerCatalogBlock(id, itemInfo(id).zh)
+  blockItems[id] = id
+  if (!placeableItems[id]) placeableItems[id] = id
+}
 type GameMode = 'survival' | 'creative' | 'adventure' | 'spectator' | 'hardcore'
 const modeNames: Record<GameMode, string> = {
   survival: '生存', creative: '创造', adventure: '冒险', spectator: '旁观者', hardcore: '极限',
@@ -30,18 +39,22 @@ app.innerHTML = `
     <div class="top-actions"><button id="transform-button" class="icon-button" aria-label="生物变身">⚔</button><span id="clock" class="glass-pill">☀ 第 1 天 · 12:00</span><button id="menu-button" class="icon-button" aria-label="打开菜单">☰</button></div>
   </header>
   <div id="target-label" class="target-label">滑动屏幕，环顾四周</div>
-  <div class="crosshair" aria-hidden="true"><i></i><i></i></div>
+  <div class="crosshair" aria-hidden="true"><i></i><i></i><b></b></div>
+  <div id="damage-flash" class="damage-flash" aria-hidden="true"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div class="bottom-hud">
     <div class="status-line"><span id="mode-chip" class="mode-chip">♥ 生存</span><span id="health">♥ 40/40</span><span id="hunger">● 20/20</span><span id="experience">✦ 0</span><span id="mine-count">已挖掘 0 块</span></div>
     <div id="hotbar" class="hotbar" aria-label="快捷物品栏"></div>
   </div>
   <div id="joystick" class="joystick" aria-label="移动摇杆"><div id="joystick-knob" class="joystick-knob"><span>✦</span></div></div>
+  <div class="movement-controls"><button id="sprint-button" class="round-action small-action" aria-label="切换疾跑" aria-pressed="false"><span class="action-icon">»</span><small>疾跑</small></button><button id="crouch-button" class="round-action small-action" aria-label="切换蹲下防坠落" aria-pressed="false"><span class="action-icon">⌄</span><small>蹲下</small></button></div>
   <div class="action-controls">
     <button id="inventory-button" class="round-action inventory-action" aria-label="打开背包"><span class="action-icon">▦</span><small>背包</small></button>
     <button id="jump-button" class="round-action jump-action" aria-label="跳跃"><span class="action-icon">↑</span><small>跳跃</small></button>
     <button id="mine-button" class="round-action mine-action" aria-label="挖掘或攻击"><span class="action-icon">⚒</span><small id="mine-label">挖掘</small></button>
     <button id="place-button" class="round-action place-action" aria-label="放置或使用"><span class="action-icon">▣</span><small id="place-label">放置</small></button>
+    <button id="eat-button" class="round-action" aria-label="直接吃食物"><span class="action-icon">◕</span><small>吃东西</small></button>
+    <button id="drop-button" class="round-action" aria-label="丢弃手中物品"><span class="action-icon">↘</span><small>丢弃</small></button>
   </div>
   <div id="welcome" class="overlay welcome-overlay">
     <div class="welcome-card">
@@ -57,11 +70,12 @@ app.innerHTML = `
   </div>
   <div id="inventory-panel" class="overlay panel-overlay hidden" role="dialog" aria-modal="true" aria-label="背包">
     <div class="panel inventory-panel">
-      <div class="panel-heading"><div><div class="eyebrow">你的方块收藏</div><h2>背包 <span>80 格</span></h2></div><button class="close-button" data-close aria-label="关闭背包">×</button></div>
-      <p id="inventory-hint" class="panel-hint">点击两个格子可以交换物品。前 8 格会显示在底部快捷栏。</p>
+      <div class="panel-heading"><div><div class="eyebrow">你的方块收藏</div><h2>背包 <span>400 格</span></h2></div><button class="close-button" data-close aria-label="关闭背包">×</button></div>
+      <p id="inventory-hint" class="panel-hint">点击两个格子交换物品。前 10 格显示在底部快捷栏。</p>
       <input id="item-search" class="search-input" type="search" placeholder="搜索材料名称 / English" aria-label="搜索材料" />
       <div id="catalog" class="catalog"></div>
       <div class="grid-label">我的背包 <span>点击格子放入选中的材料</span></div>
+      <div class="inventory-tools"><button id="inventory-drop-one" class="menu-option">丢弃选中格 1 个</button><button id="inventory-drop-stack" class="menu-option">丢弃选中整组</button></div>
       <div id="inventory-grid" class="inventory-grid"></div>
     </div>
   </div>
@@ -73,6 +87,7 @@ app.innerHTML = `
       <button id="journey-button" class="menu-option">世界旅程 <span>✦</span></button>
       <button id="mode-button" class="menu-option">游戏模式 <span id="mode-label">生存</span></button>
       <button id="camera-button" class="menu-option">切换视角 <span id="camera-label">第一人称</span></button>
+      <button id="command-button" class="menu-option">中文指令 <span>输入</span></button>
       <button id="flight-button" class="menu-option">飞行 <span id="flight-label">关闭</span></button>
       <button id="coins-button" class="menu-option">金币（点击 ＋ 免费增加） <span id="coins-label">0 ＋</span></button>
       <button id="skin-button" class="menu-option">制作皮肤与物品商店 <span>✎</span></button>
@@ -88,16 +103,20 @@ app.innerHTML = `
   <div id="craft-panel" class="overlay panel-overlay hidden" role="dialog" aria-modal="true" aria-label="工作台与合成">
     <div class="panel craft-panel">
       <div class="panel-heading"><div><div class="eyebrow">制作新的东西</div><h2>工作台 <span id="bench-label">9 格</span></h2></div><button class="close-button" data-close aria-label="关闭工作台">×</button></div>
-      <p class="panel-hint">搜索中文或英文物品名。材料来自背包，创造模式可直接取出材料。</p>
-      <div class="bench-controls"><button id="bench-less" class="menu-option">减少 9 格</button><button id="bench-more" class="menu-option">增加 9 格</button></div>
+      <p class="panel-hint">点击材料，再点击格子摆放；四块同种木板可合成工作台。搜索中文或英文配方。</p>
+      <div class="bench-controls"><button id="craft-mode" class="menu-option">切换到 3×3 工作台</button><button id="bench-less" class="menu-option">减少 9 格</button><button id="bench-more" class="menu-option">增加 9 格</button></div>
+      <div id="craft-materials" class="craft-materials"></div>
+      <div class="craft-workspace"><div id="craft-grid" class="craft-grid"></div><div class="craft-result"><span id="craft-result-label">选择材料填入格子</span><button id="craft-grid-make" class="primary-button" disabled>合成</button><button id="craft-grid-clear" class="menu-option">清空格子</button></div></div>
       <input id="recipe-search" class="search-input" type="search" placeholder="搜索合成物品 / English" aria-label="搜索合成物品" />
       <div id="recipe-list" class="recipe-list"></div>
     </div>
   </div>
   <div id="mob-panel" class="overlay panel-overlay hidden" role="dialog" aria-modal="true" aria-label="生物变身">
     <div class="panel menu-panel">
-      <div class="panel-heading"><div><div class="eyebrow">击败一次即可解锁</div><h2>生物收藏</h2></div><button class="close-button" data-close aria-label="关闭生物收藏">×</button></div>
+      <div class="panel-heading"><div><div class="eyebrow">选择想成为的生物或物品</div><h2>自由变身</h2></div><button class="close-button" data-close aria-label="关闭生物收藏">×</button></div>
       <div id="mob-list" class="mob-list"></div>
+      <input id="morph-search" class="search-input" type="search" placeholder="搜索任意物品或生物蛋 / English" aria-label="搜索变身目标" />
+      <div id="morph-items" class="catalog"></div>
     </div>
   </div>
   <div id="journey-panel" class="overlay panel-overlay hidden" role="dialog" aria-modal="true" aria-label="世界旅程">
@@ -142,13 +161,28 @@ app.innerHTML = `
       <div id="online-content"></div>
     </div>
   </div>
+  <div id="command-panel" class="overlay panel-overlay hidden" role="dialog" aria-modal="true" aria-label="中文指令">
+    <div class="panel menu-panel"><div class="panel-heading"><h2>中文指令</h2><button class="close-button" data-close aria-label="关闭指令">×</button></div>
+      <p class="panel-hint">例如：调到白天、调到晚上、给我 64 个钻石、切换创造模式、传送到主世界、恢复生命。</p>
+      <input id="command-input" class="search-input" maxlength="80" placeholder="输入中文指令" aria-label="中文指令" />
+      <button id="command-run" class="primary-button">执行指令</button>
+      <p id="command-status" class="panel-hint" role="status"></p>
+    </div>
+  </div>
+  <div id="landscape-hint" class="landscape-hint hidden">请将手机横过来，获得完整的游戏画面</div>
 `
 
 const world = new VoxelWorld()
 const scene = new THREE.Scene()
 const daySky = new THREE.Color('#9bd6e7')
 const nightSky = new THREE.Color('#122543')
-scene.background = daySky.clone()
+const skyCanvas = document.createElement('canvas')
+skyCanvas.width = 512
+skyCanvas.height = 256
+const skyContext = skyCanvas.getContext('2d')!
+const skyTexture = new THREE.CanvasTexture(skyCanvas)
+skyTexture.colorSpace = THREE.SRGBColorSpace
+scene.background = skyTexture
 scene.fog = new THREE.Fog(daySky.clone(), 22, 74)
 scene.add(world.mesh)
 const entities = new EntityManager(scene, world)
@@ -212,6 +246,8 @@ type SaveData = {
   benchSize: number
   unlockedMobs: MobKind[]
   transform: MobKind | null
+  itemForm?: ItemId | null
+  drops?: { id: ItemId; count: number; x: number; z: number; dimension: Dimension }[]
   dimension: Dimension
   editsByDimension: Partial<Record<Dimension, [string, BlockId | null][]>>
   strongholdLocated: boolean
@@ -234,17 +270,25 @@ function readSave(): SaveData | null {
     const save = data as SaveData
     if (!Array.isArray(save.edits) || !Array.isArray(save.inventory)) return null
     if (!save.player || ![save.player.x, save.player.z, save.player.foot, save.player.yaw, save.player.pitch].every(Number.isFinite)) return null
+    const validMods = Array.isArray(save.customMods) ? save.customMods.filter((mod): mod is { id: string; name: string; color: string } =>
+      !!mod && /^custom_[a-z0-9_]{1,36}$/.test(mod.id) && typeof mod.name === 'string' && /^#[0-9a-fA-F]{6}$/.test(mod.color)).slice(0, 100) : []
+    for (const mod of validMods) allItems[mod.id] = { zh: mod.name, en: mod.name, stack: 64 }
     return {
       ...save,
       version: 2,
       inventory: normalizeInventory(save.inventory.map((slot) => typeof slot === 'string' ? blockItems[slot as BlockId] ?? slot : slot)),
       mode: save.version === 2 && save.mode in modeNames ? save.mode : 'creative',
-      health: Number.isFinite(save.health) ? Math.max(0, Math.min(40, save.health)) : 40,
+      health: Number.isFinite(save.health) ? Math.max(0, Math.min(save.transform && save.transform in mobInfo ? mobInfo[save.transform].health : 40, save.health)) : 40,
       hunger: Number.isFinite(save.hunger) ? Math.max(0, Math.min(20, save.hunger)) : 20,
       experience: Number.isFinite(save.experience) ? Math.max(0, save.experience) : 0,
       benchSize: Number.isInteger(save.benchSize) ? Math.max(9, Math.min(3000, save.benchSize)) : 9,
       unlockedMobs: Array.isArray(save.unlockedMobs) ? save.unlockedMobs.filter((id): id is MobKind => id in mobInfo) : [],
       transform: save.transform && save.transform in mobInfo ? save.transform : null,
+      itemForm: typeof save.itemForm === 'string' && allItems[save.itemForm] ? save.itemForm : null,
+      drops: Array.isArray(save.drops) ? save.drops.filter((drop) => drop && typeof drop.id === 'string' && allItems[drop.id] &&
+        Number.isInteger(drop.count) && drop.count > 0 && drop.count <= itemInfo(drop.id).stack &&
+        Number.isFinite(drop.x) && Number.isFinite(drop.z) && Math.abs(drop.x) < 20 && Math.abs(drop.z) < 20 &&
+        ['overworld', 'nether', 'end', 'end_city'].includes(drop.dimension)).slice(0, 100) : [],
       dimension: ['overworld', 'nether', 'end', 'end_city'].includes(save.dimension) ? save.dimension : 'overworld',
       editsByDimension: save.editsByDimension && typeof save.editsByDimension === 'object' ? save.editsByDimension : { overworld: save.edits },
       strongholdLocated: !!save.strongholdLocated,
@@ -255,8 +299,7 @@ function readSave(): SaveData | null {
         : Array(64).fill('#71a7bd'),
       skinShape: ['normal', 'item', 'air'].includes(save.skinShape) ? save.skinShape : 'normal',
       ownedSkins: Array.isArray(save.ownedSkins) ? save.ownedSkins.filter((id): id is string => typeof id === 'string' && id.length < 30) : [],
-      customMods: Array.isArray(save.customMods) ? save.customMods.filter((mod): mod is { id: string; name: string; color: string } =>
-        !!mod && /^custom_[a-z0-9_]{1,36}$/.test(mod.id) && typeof mod.name === 'string' && /^#[0-9a-fA-F]{6}$/.test(mod.color)).slice(0, 100) : [],
+      customMods: validMods,
       ownedMods: Array.isArray(save.ownedMods) ? save.ownedMods.filter((id): id is string => typeof id === 'string' && ['shader', 'realistic', 'double_loot', 'excavator'].includes(id)) : [],
       activeMiniGame: typeof save.activeMiniGame === 'string' && ['mining', 'treasure', 'parkour'].includes(save.activeMiniGame) ? save.activeMiniGame : null,
       miniProgress: Number.isFinite(save.miniProgress) ? Math.max(0, save.miniProgress) : 0,
@@ -302,6 +345,8 @@ for (const [width, height, depth, x, y, z] of [
   avatar.add(part)
 }
 scene.add(avatar)
+const formGroup = new THREE.Group()
+scene.add(formGroup)
 if (Math.abs(player.x) > world.radius || Math.abs(player.z) > world.radius || player.foot < -2) {
   player.x = 0.5
   player.z = 0.5
@@ -310,10 +355,14 @@ if (Math.abs(player.x) > world.radius || Math.abs(player.z) > world.radius || pl
 
 const validBlock = (value: unknown): value is BlockId => BLOCKS.some((block) => block.id === value)
 const inventory: Inventory = saved?.inventory ?? emptyInventory()
+if (!saved) inventory[0] = { id: 'oak_log', count: 1 }
 
 let selectedIndex = 0
 let catalogChoice: ItemId = 'grass_block'
 let inventorySelection: number | null = null
+const DAY_DURATION = 360
+const NIGHT_DURATION = 420
+const DAY_END = DAY_DURATION / (DAY_DURATION + NIGHT_DURATION)
 let timeOfDay = Number.isFinite(saved?.time) ? saved!.time % 1 : 0.25
 let day = Number.isFinite(saved?.day) ? Math.max(1, Math.floor(saved!.day)) : 1
 let mined = Number.isFinite(saved?.mined) ? saved!.mined : 0
@@ -322,8 +371,16 @@ let health = saved?.health ?? 40
 let hunger = saved?.hunger ?? 20
 let experience = saved?.experience ?? 0
 let benchSize = saved?.benchSize ?? 9
+let usingWorkbench = false
+let craftChoice: ItemId | null = null
+let craftGrid: (ItemId | null)[] = Array(4).fill(null)
+let sleeping = false
+let cameraMode: 0 | 1 | 2 = 0
 const unlockedMobs = new Set<MobKind>(saved?.unlockedMobs ?? [])
 let transform = saved?.transform ?? null
+let itemForm = saved?.itemForm ?? null
+let sprinting = false
+let crouching = false
 const editsByDimension: Partial<Record<Dimension, [string, BlockId | null][]>> = saved?.editsByDimension ?? {}
 let strongholdLocated = saved?.strongholdLocated ?? false
 let dragonDefeated = saved?.dragonDefeated ?? false
@@ -346,6 +403,8 @@ let localSnapshot: {
 } | null = null
 const remoteAvatars = new Map<string, THREE.Group>()
 const sharedProducts = new Map<string, WorkshopProduct>()
+type DroppedItem = { id: ItemId; count: number; x: number; z: number; dimension: Dimension; mesh: THREE.Mesh; pickupAfter: number }
+const droppedItems: DroppedItem[] = []
 if (saved && saved.dimension !== 'overworld') {
   if (saved.dimension === 'nether') {
     entities.spawn('blaze', 9, 9)
@@ -365,13 +424,45 @@ const targetLabel = $<HTMLDivElement>('#target-label')
 
 function swatch(id: ItemId): string {
   const block = BLOCKS.find((item) => blockItems[item.id] === id)
-  const hash = [...id].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7)
-  const color = block?.color ?? `hsl(${hash % 360} 42% 62%)`
-  return `<span class="block-swatch ${block?.id ?? ''}" style="--block-color:${color}"></span>`
+  return `<span class="block-swatch" style="background-image:url(${iconUrl(id, block?.color)})"></span>`
 }
 
+function updateFormAppearance(): void {
+  formGroup.clear()
+  if (transform) formGroup.add(makeMob(transform))
+  else if (itemForm) {
+    const name = itemForm.endsWith('_spawn_egg')
+    const hue = [...itemForm].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 360
+    const material = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(hue / 360, 0.48, 0.62) })
+    if (name) {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.7, 1), material)
+      body.position.y = 0.75
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.56, 0.5), material)
+      head.position.set(0, 1.28, -0.47)
+      formGroup.add(body, head)
+    } else {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.75), material)
+      mesh.position.y = 0.45
+      formGroup.add(mesh)
+    }
+  }
+  if (transform || itemForm) { thirdPerson = true; if (cameraMode === 0) cameraMode = 1 }
+  updateStatus()
+}
+
+function spawnDroppedItem(id: ItemId, count: number, x: number, z: number, dimension: Dimension, delay = 1800): void {
+  if (droppedItems.length >= 100) return
+  const color = new THREE.Color().setHSL([...id].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360 / 360, 0.45, 0.64)
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36), new THREE.MeshLambertMaterial({ color }))
+  scene.add(mesh)
+  droppedItems.push({ id, count, x, z, dimension, mesh, pickupAfter: performance.now() + delay })
+}
+
+for (const drop of saved?.drops ?? []) spawnDroppedItem(drop.id, drop.count, drop.x, drop.z, drop.dimension, 800)
+updateFormAppearance()
+
 function renderHotbar(): void {
-  hotbar.innerHTML = inventory.slice(0, 8).map((slot, index) => `
+  hotbar.innerHTML = inventory.slice(0, HOTBAR_SIZE).map((slot, index) => `
     <button class="hotbar-slot ${index === selectedIndex ? 'selected' : ''}" data-slot="${index}" aria-label="快捷栏 ${index + 1}${slot ? `，${itemInfo(slot.id).zh} ${slot.count} 个` : '，空'}" aria-pressed="${index === selectedIndex}">
       ${slot ? swatch(slot.id) : '<span class="empty-swatch">＋</span>'}<span class="slot-number">${slot?.count ?? index + 1}</span>
     </button>
@@ -387,13 +478,13 @@ function renderCatalog(): void {
     <button class="catalog-item ${id === catalogChoice ? 'active' : ''}" data-item="${id}">${swatch(id)}<span>${itemInfo(id).zh}<small>${itemInfo(id).en}</small></span></button>
   `).join('') : '<p class="no-results">还没有这种材料，试试其他名称。</p>'
   $<HTMLParagraphElement>('#inventory-hint').textContent = mode === 'creative'
-    ? '创造模式：先选材料，再点格子取出 64 个。前 8 格是快捷栏。'
+    ? '创造模式：先选材料，再点格子取出一组。前 10 格是快捷栏。'
     : '生存模式：点击两个格子交换物品。挖掘得到材料，工作台可以合成。'
 }
 
 function renderInventory(): void {
   inventoryGrid.innerHTML = inventory.map((slot, index) => `
-    <button class="inventory-slot ${index < 8 ? 'quick-slot' : ''} ${inventorySelection === index ? 'selected' : ''}" data-inventory-slot="${index}" aria-label="背包第 ${index + 1} 格${slot ? `，${itemInfo(slot.id).zh} ${slot.count} 个` : '，空'}">
+    <button class="inventory-slot ${index < HOTBAR_SIZE ? 'quick-slot' : ''} ${inventorySelection === index ? 'selected' : ''}" data-inventory-slot="${index}" aria-label="背包第 ${index + 1} 格${slot ? `，${itemInfo(slot.id).zh} ${slot.count} 个` : '，空'}">
       ${slot ? swatch(slot.id) : '<span class="slot-placeholder">·</span>'}<span class="inventory-number">${slot?.count ?? index + 1}</span>
     </button>
   `).join('')
@@ -405,11 +496,45 @@ function updateStatus(): void {
   $('#health').textContent = `♥ ${Math.ceil(health)}/${transform ? mobInfo[transform].health : 40}`
   $('#hunger').textContent = `● ${Math.ceil(hunger)}/20`
   $('#experience').textContent = `✦ ${Math.floor(experience)}`
-  $('#bench-label').textContent = `${benchSize} 格`
+  $('#bench-label').textContent = usingWorkbench ? `${benchSize} 格` : '随身 2×2'
   $('#bench-label').classList.toggle('rainbow', benchSize === 3000)
-  $('#camera-label').textContent = thirdPerson ? '第三人称' : '第一人称'
+  $('#camera-label').textContent = ['第一人称', '第三人称', '前置视角'][cameraMode]
   $('#flight-label').textContent = flying || mode === 'spectator' ? '开启' : '关闭'
   $('#coins-label').textContent = `${coins} ＋`
+}
+
+function workbenchNearby(): boolean {
+  if (mode === 'creative') return true
+  for (let x = Math.floor(player.x) - 4; x <= Math.floor(player.x) + 4; x++) {
+    for (let z = Math.floor(player.z) - 4; z <= Math.floor(player.z) + 4; z++) {
+      if (Math.hypot(x + 0.5 - player.x, z + 0.5 - player.z) > 4.5) continue
+      for (let y = Math.floor(player.foot) - 2; y <= Math.floor(player.foot) + 2; y++) {
+        if (world.getBlock(x, y, z) === 'crafting_table') return true
+      }
+    }
+  }
+  return false
+}
+
+function craftCapacity(): number { return usingWorkbench && workbenchNearby() ? benchSize : 4 }
+
+function renderCraftGrid(): void {
+  if (usingWorkbench && !workbenchNearby()) usingWorkbench = false
+  const width = usingWorkbench ? 3 : 2
+  if (craftGrid.length !== width * width) craftGrid = Array(width * width).fill(null)
+  const supplies = inventory.filter((slot, index, all) => slot && all.findIndex((other) => other?.id === slot.id) === index)
+    .map((slot) => slot!)
+  $('#craft-materials').innerHTML = supplies.map((slot) => `<button class="craft-material ${craftChoice === slot.id ? 'selected' : ''}" data-craft-material="${slot.id}">${swatch(slot.id)}<span>${itemInfo(slot.id).zh}<small>×${countItem(inventory, slot.id)}</small></span></button>`).join('') || '<span class="panel-hint">先挖木头，随身合成木板。</span>'
+  $('#craft-grid').className = `craft-grid width-${width}`
+  $('#craft-grid').innerHTML = craftGrid.map((id, index) => `<button class="craft-cell" data-craft-cell="${index}" aria-label="合成格 ${index + 1}${id ? ` ${itemInfo(id).zh}` : ' 空'}">${id ? swatch(id) : '<span>＋</span>'}</button>`).join('')
+  const match = matchingRecipe(craftGrid, width)
+  $('#craft-result-label').textContent = match ? `${itemInfo(match.result).zh} ×${match.count}` : '配方未匹配'
+  $<HTMLButtonElement>('#craft-grid-make').disabled = !match || !canCraft(inventory, match, craftCapacity())
+  $('#craft-mode').textContent = usingWorkbench ? '切换到随身 2×2' : '切换到 3×3 工作台'
+  $<HTMLButtonElement>('#craft-mode').disabled = !usingWorkbench && !workbenchNearby()
+  $('#bench-less').classList.toggle('hidden', !usingWorkbench)
+  $('#bench-more').classList.toggle('hidden', !usingWorkbench)
+  updateStatus()
 }
 
 function renderRecipes(): void {
@@ -418,13 +543,16 @@ function renderRecipes(): void {
     const info = itemInfo(recipe.result)
     return !query || info.zh.includes(query) || info.en.toLowerCase().includes(query) || recipe.result.includes(query)
   })
-  const shown = (query ? chosen : chosen.slice(-30)).slice(0, 60)
+  const featured = ['oak_planks', 'crafting_table', 'stick', 'white_bed', 'flint_and_steel']
+    .map((id) => recipes.find((recipe) => recipe.result === id && (!recipe.shape || recipe.shape.flat().includes('oak_planks'))))
+    .filter((recipe): recipe is NonNullable<typeof recipe> => !!recipe)
+  const shown = (query ? chosen : [...featured, ...chosen.slice(-25)]).slice(0, 60)
   $('#recipe-list').innerHTML = shown.length ? shown.map((recipe) => {
     const index = recipes.indexOf(recipe)
     const needs = [...recipeNeeds(recipe)].map(([id, count]) => `${itemInfo(id).zh}×${count}`).join('、')
-    const possible = canCraft(inventory, recipe, benchSize)
-    const capacity = recipeSize(recipe) <= benchSize
-    return `<div class="recipe-card"><div>${swatch(recipe.result)}<strong>${itemInfo(recipe.result).zh} ×${recipe.count}</strong><small>${needs}</small></div><button data-craft="${index}" ${possible ? '' : 'disabled'}>${possible ? '合成' : capacity ? '材料不足' : `需要 ${recipeSize(recipe)} 格`}</button></div>`
+    const capacity = recipeFits(recipe, usingWorkbench ? 3 : 2) || usingWorkbench && recipeSize(recipe) <= benchSize
+    const possible = capacity && canCraft(inventory, recipe, craftCapacity())
+    return `<div class="recipe-card"><div>${swatch(recipe.result)}<strong>${itemInfo(recipe.result).zh} ×${recipe.count}</strong><small>${needs}</small></div><button data-craft="${index}" ${possible ? '' : 'disabled'}>${possible ? recipeFits(recipe, usingWorkbench ? 3 : 2) ? '填入格子' : '合成' : capacity ? '材料不足' : '需要工作台'}</button></div>`
   }).join('') : '<p class="no-results">没有找到这个配方。</p>'
 }
 
@@ -445,6 +573,8 @@ function saveWorld(): void {
     benchSize,
     unlockedMobs: [...unlockedMobs],
     transform,
+    itemForm,
+    drops: droppedItems.map(({ id, count, x, z, dimension }) => ({ id, count, x, z, dimension })),
     dimension: localSnapshot?.dimension ?? world.dimension,
     editsByDimension: activeEdits,
     strongholdLocated,
@@ -475,18 +605,27 @@ function showToast(message: string): void {
 
 function updateCamera(): void {
   avatar.position.set(player.x, player.foot, player.z)
+  formGroup.position.set(player.x, player.foot - (crouching ? 0.25 : 0), player.z)
+  formGroup.rotation.y = player.yaw
+  formGroup.visible = thirdPerson && !!(transform || itemForm)
   avatar.rotation.y = player.yaw
   avatar.rotation.z = emoteUntil > performance.now() ? Math.sin(performance.now() * 0.004 * (1 + emoteIndex % 4)) * (0.12 + emoteIndex % 5 * 0.05) : 0
   avatar.rotation.x = emoteUntil > performance.now() ? Math.cos(performance.now() * 0.003 * (1 + emoteIndex % 3)) * (0.08 + emoteIndex % 7 * 0.035) : 0
-  avatar.visible = thirdPerson && skinShape !== 'air'
-  if (thirdPerson) {
+  avatar.visible = thirdPerson && !transform && !itemForm && skinShape !== 'air'
+  if (cameraMode === 2) {
+    camera.position.set(player.x - Math.sin(player.yaw) * 3.5, player.foot + (crouching ? 1.4 : 1.85), player.z - Math.cos(player.yaw) * 3.5)
+    camera.lookAt(player.x, player.foot + 1.1, player.z)
+  } else if (thirdPerson) {
     camera.position.set(
       player.x + Math.sin(player.yaw) * 3.5,
-      player.foot + 2.5 + Math.sin(player.pitch) * 1.1,
+      player.foot + (crouching ? 2.05 : 2.5) + Math.sin(player.pitch) * 1.1,
       player.z + Math.cos(player.yaw) * 3.5,
     )
-  } else camera.position.set(player.x, player.foot + 1.58, player.z)
-  camera.rotation.set(player.pitch, player.yaw, 0)
+    camera.rotation.set(player.pitch, player.yaw, 0)
+  } else {
+    camera.position.set(player.x, player.foot + (crouching ? 1.16 : 1.58), player.z)
+    camera.rotation.set(player.pitch, player.yaw, 0)
+  }
 }
 
 const raycaster = new THREE.Raycaster()
@@ -542,9 +681,15 @@ function updateTarget(): void {
 function renderMobs(): void {
   const kinds = Object.keys(mobInfo) as MobKind[]
   $('#mob-list').innerHTML = `<button class="menu-option" data-transform="none">恢复玩家形态</button>` + kinds.map((kind) => {
-    const unlocked = unlockedMobs.has(kind)
-    return `<div class="menu-option">${mobInfo[kind].name}<span><button data-transform="${kind}" ${unlocked ? '' : 'disabled'}>${unlocked ? transform === kind ? '当前形态' : '变身' : '未解锁'}</button>${onlineWorldId && unlocked ? `<button data-spawn="${kind}">放置生物</button>` : ''}</span></div>`
+    return `<div class="menu-option">${mobInfo[kind].name}<span><button data-transform="${kind}">${transform === kind ? '当前形态' : '变身'}</button>${onlineWorldId && unlockedMobs.has(kind) ? `<button data-spawn="${kind}">放置生物</button>` : ''}</span></div>`
   }).join('')
+  renderMorphItems()
+}
+
+function renderMorphItems(): void {
+  const query = $<HTMLInputElement>('#morph-search').value.trim()
+  const ids = query ? searchItems(query, 80) : Object.keys(allItems).filter((id) => id.endsWith('_spawn_egg')).slice(0, 32)
+  $('#morph-items').innerHTML = ids.map((id) => `<button class="catalog-item" data-item-morph="${id}">${swatch(id)}<span>${itemInfo(id).zh}<small>${itemInfo(id).en}</small></span></button>`).join('') || '<p class="no-results">没有找到这个形态。</p>'
 }
 
 function renderJourney(): void {
@@ -863,6 +1008,10 @@ function travel(dimension: Dimension): void {
 function receiveDamage(amount: number): void {
   if (mode === 'creative' || mode === 'spectator' || !playing) return
   health = Math.max(0, health - amount)
+  const flash = $('#damage-flash')
+  flash.classList.remove('visible')
+  void flash.offsetWidth
+  flash.classList.add('visible')
   updateStatus()
   showToast(`受到攻击，损失 ${amount} 点血量`)
   if (health > 0) return
@@ -881,6 +1030,51 @@ function receiveDamage(amount: number): void {
   showToast('你在起点重新醒来')
   updateStatus()
   saveWorld()
+}
+
+function runChineseCommand(raw: string): string {
+  const command = raw.trim().replace(/^\//, '').replace(/\s+/g, '')
+  if (!command) return '请输入指令'
+  const timeName = command.match(/(?:时间|调到|改成|设为|切换到)?(白天|早上|中午|黄昏|傍晚|晚上|黑夜|午夜)/)
+  const clock = command.match(/(?:时间|调到|改成|设为)?(\d{1,2})[:：点](\d{1,2})?分?/)
+  if (timeName || clock) {
+    const hour = clock ? Number(clock[1]) + Number(clock[2] ?? 0) / 60 : ({ 白天: 8, 早上: 6, 中午: 12, 黄昏: 18, 傍晚: 18, 晚上: 21, 黑夜: 22, 午夜: 0 } as Record<string, number>)[timeName![1]]
+    if (hour < 0 || hour >= 24 || clock && Number(clock[2] ?? 0) >= 60) return '时间格式应为 0:00 至 23:59'
+    timeOfDay = hour >= 6 && hour < 18 ? (hour - 6) / 12 * DAY_END
+      : DAY_END + ((hour < 6 ? hour + 24 : hour) - 18) / 12 * (1 - DAY_END)
+    saveWorld()
+    return `时间已调到 ${String(Math.floor(hour)).padStart(2, '0')}:${String(Math.round(hour % 1 * 60)).padStart(2, '0')}`
+  }
+  const modeEntry = Object.entries(modeNames).find(([, name]) => command.includes(name + '模式'))
+  if (modeEntry) {
+    mode = modeEntry[0] as GameMode
+    if (mode !== 'creative') flying = false
+    updateStatus(); saveWorld()
+    return `已切换到${modeEntry[1]}模式`
+  }
+  const dimension = ({ 主世界: 'overworld', 下界: 'nether', 末地城: 'end_city', 末地: 'end' } as Record<string, Dimension>)[command.match(/末地城|主世界|下界|末地/)?.[0] ?? '']
+  if (dimension && /传送|前往|去/.test(command)) { travel(dimension); return `已前往${command.match(/末地城|主世界|下界|末地/)![0]}` }
+  if (/恢复生命|回满血|治疗|加满血/.test(command)) { health = transform ? mobInfo[transform].health : 40; updateStatus(); saveWorld(); return '生命已恢复' }
+  if (/恢复饱食度|吃饱|加满饱食度/.test(command)) { hunger = 20; updateStatus(); saveWorld(); return '饱食度已恢复' }
+  const give = command.match(/(?:给我|获得|获取)(\d+)?(?:个|块|组)?(.+)/)
+  if (give) {
+    const count = Math.min(400, Number(give[1] ?? 1))
+    const name = give[2]
+    const id = Object.keys(allItems).find((item) => item === name || allItems[item].zh === name || allItems[item].en.toLowerCase() === name.toLowerCase())
+    if (!id) return `找不到物品：${name}`
+    const left = addItem(inventory, id, count)
+    renderHotbar(); saveWorld()
+    return left ? `背包已满，获得了${itemInfo(id).zh} ×${count - left}` : `获得了${itemInfo(id).zh} ×${count}`
+  }
+  const summonName = command.match(/(?:召唤|生成)(.+)/)?.[1]
+  if (summonName) {
+    const kind = (Object.keys(mobInfo) as MobKind[]).find((id) => id === summonName || mobInfo[id].name === summonName)
+    if (!kind) return `找不到生物：${summonName}`
+    entities.spawn(kind, Math.min(18, player.x + 2), Math.min(18, player.z + 2))
+    return `已召唤${mobInfo[kind].name}`
+  }
+  if (/跳过夜晚|天亮/.test(command)) { timeOfDay = 0; day++; saveWorld(); return '天亮了' }
+  return '暂不支持这条指令。可试：调到晚上、给我 64 个钻石、切换创造模式。'
 }
 
 function attackMob(mob: Mob): void {
@@ -934,21 +1128,84 @@ function mine(): void {
   }
 }
 
+const foodValues: Record<string, number> = {
+  apple: 4, golden_apple: 4, enchanted_golden_apple: 4, bread: 5, cookie: 2, cake: 7,
+  carrot: 3, golden_carrot: 6, potato: 1, baked_potato: 5, beetroot: 1,
+  mushroom_stew: 6, rabbit_stew: 10, beetroot_soup: 6, suspicious_stew: 6,
+  chicken: 2, cooked_chicken: 6, mutton: 2, cooked_mutton: 6,
+  beef: 3, cooked_beef: 8, porkchop: 3, cooked_porkchop: 8,
+  rabbit: 3, cooked_rabbit: 5, cod: 2, cooked_cod: 5,
+  salmon: 2, cooked_salmon: 6, tropical_fish: 1, pufferfish: 1,
+  melon_slice: 2, sweet_berries: 2, glow_berries: 2, dried_kelp: 1,
+  pumpkin_pie: 8, honey_bottle: 6, rotten_flesh: 4,
+}
+
+function eatFood(preferredIndex = selectedIndex): void {
+  if (!playing || panelOpen) return
+  const index = inventory[preferredIndex] && foodValues[inventory[preferredIndex]!.id]
+    ? preferredIndex : inventory.findIndex((slot) => !!slot && !!foodValues[slot.id])
+  if (index < 0) return showToast('背包里没有可以吃的食物')
+  const slot = inventory[index]!
+  if (hunger >= 20 && health >= (transform ? mobInfo[transform].health : 40)) return showToast('现在不饿，也不需要恢复生命')
+  const id = slot.id
+  hunger = Math.min(20, hunger + foodValues[id])
+  health = Math.min(transform ? mobInfo[transform].health : 40, health + (id.includes('golden_apple') ? 6 : 1))
+  if (mode !== 'creative') {
+    slot.count--
+    if (slot.count === 0) inventory[index] = null
+  }
+  renderHotbar(); updateStatus(); saveWorld(); showToast(`吃了${itemInfo(id).zh}`)
+}
+
+function dropFromSlot(index: number, wholeStack: boolean): void {
+  if (!playing) return
+  const slot = inventory[index]
+  if (!slot) return showToast('选中的格子是空的')
+  if (droppedItems.length >= 100) return showToast('地上的掉落物太多')
+  const count = wholeStack ? slot.count : 1
+  const id = slot.id
+  slot.count -= count
+  if (slot.count === 0) inventory[index] = null
+  const x = Math.max(-19, Math.min(19, player.x - Math.sin(player.yaw) * 1.35))
+  const z = Math.max(-19, Math.min(19, player.z - Math.cos(player.yaw) * 1.35))
+  spawnDroppedItem(id, count, x, z, world.dimension)
+  if (!$('#inventory-panel').classList.contains('hidden')) renderInventory()
+  renderHotbar(); saveWorld()
+  showToast(`丢出了${itemInfo(id).zh} ×${count}，靠近可捡回`)
+}
+
 function place(): void {
   if (!playing || panelOpen) return
   const slot = inventory[selectedIndex]
   if (!slot) return showToast('选择一种材料后再放置')
-  if (['chicken', 'cooked_chicken', 'mutton', 'cooked_mutton', 'beef', 'cooked_beef', 'porkchop', 'cooked_porkchop', 'bread', 'apple'].includes(slot.id)) {
-    if (hunger >= 20) return showToast('现在还不饿')
-    hunger = Math.min(20, hunger + (slot.id.startsWith('cooked_') ? 7 : 4))
-    if (mode !== 'creative') takeItem(inventory, slot.id, 1)
-    renderHotbar(); updateStatus(); saveWorld()
-    return showToast(`吃了${itemInfo(slot.id).zh}`)
-  }
+  if (foodValues[slot.id]) return eatFood(selectedIndex)
   if (slot.id.endsWith('_bed')) {
-    if (timeOfDay < 0.5) return showToast('天还没黑，晚上才能睡觉')
+    if (timeOfDay < DAY_END) return showToast('天还没黑，晚上才能睡觉')
+    if (sleeping) return showToast('正在睡觉')
+    sleeping = true
     showToast('正在睡觉，10 秒后天亮')
-    window.setTimeout(() => { timeOfDay = 0.02; day++; saveWorld(); showToast('早上好！') }, 10000)
+    window.setTimeout(() => { timeOfDay = 0; day++; sleeping = false; saveWorld(); showToast('早上好！') }, 10000)
+    return
+  }
+  if (slot.id === 'flint_and_steel') {
+    if (!currentTarget) return showToast('请先对准要点燃的方块')
+    const { x, y, z, nx, ny, nz } = currentTarget
+    const bx = x + nx, by = y + ny, bz = z + nz
+    if (world.getBlock(bx, by, bz)) return showToast('这里无法点火')
+    if (!world.setBlock(bx, by, bz, 'fire')) return showToast('这里无法点火')
+    if (onlineWorldId) online.send({ type: 'edit', dimension: world.dimension, x: bx, y: by, z: bz, blockId: 'fire' })
+    for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const id = world.getBlock(bx + dx, by - 1, bz + dz)
+      if (id === 'wood' || id === 'leaves' || id?.endsWith('_planks')) {
+        window.setTimeout(() => {
+          if (world.getBlock(bx + dx, by - 1, bz + dz) === id) world.setBlock(bx + dx, by - 1, bz + dz, null)
+          saveWorld()
+        }, 2500)
+      }
+    }
+    window.setTimeout(() => { if (world.getBlock(bx, by, bz) === 'fire') world.setBlock(bx, by, bz, null); saveWorld() }, 10000)
+    showToast('方块着火了，火焰会造成伤害')
+    saveWorld()
     return
   }
   if (mode === 'spectator' || mode === 'adventure') return showToast('当前模式不能放置方块')
@@ -977,15 +1234,24 @@ function place(): void {
 }
 
 function collides(x: number, z: number, foot: number): boolean {
+  const sneak = crouching || keys.has('Shift')
   for (const dx of [-0.28, 0.28]) {
     for (const dz of [-0.28, 0.28]) {
-      for (const dy of [0.15, 0.9, 1.5]) {
+      for (const dy of sneak ? [0.15, 0.65, 1.16] : [0.15, 0.9, 1.5]) {
         const block = world.getBlock(Math.floor(x + dx), Math.floor(foot + dy), Math.floor(z + dz))
-        if (block && !block.startsWith('painting_') && !block.startsWith('item_frame_')) return true
+        if (block && !block.startsWith('painting_') && !block.startsWith('item_frame_') && block !== 'fire') return true
       }
     }
   }
   return false
+}
+
+function hasSafeFooting(x: number, z: number, foot: number): boolean {
+  for (const dx of [-0.27, 0.27]) for (const dz of [-0.27, 0.27]) {
+    const block = world.getBlock(Math.floor(x + dx), Math.floor(foot - 0.06), Math.floor(z + dz))
+    if (!block || block === 'fire' || block.startsWith('painting_') || block.startsWith('item_frame_')) return false
+  }
+  return true
 }
 
 function jump(): void {
@@ -999,19 +1265,22 @@ function jump(): void {
 
 const movement = { x: 0, y: 0 }
 const keys = new Set<string>()
+let highestAirFoot = player.foot
 
 function movePlayer(dt: number): void {
   let side = movement.x + (keys.has('d') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('a') || keys.has('ArrowLeft') ? 1 : 0)
   let forward = -movement.y + (keys.has('w') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('s') || keys.has('ArrowDown') ? 1 : 0)
   const magnitude = Math.hypot(side, forward)
   if (magnitude > 1) { side /= magnitude; forward /= magnitude }
-  const speed = 4.2 * dt
+  const sneak = crouching || keys.has('Shift')
+  const run = (sprinting || keys.has('Control')) && !sneak && hunger > 0
+  const speed = (sneak ? 1.75 : run ? 7.2 : 4.2) * dt
   const dx = (side * Math.cos(player.yaw) - forward * Math.sin(player.yaw)) * speed
   const dz = (-side * Math.sin(player.yaw) - forward * Math.cos(player.yaw)) * speed
   const nextX = Math.max(-world.radius + 0.35, Math.min(world.radius - 0.35, player.x + dx))
   const nextZ = Math.max(-world.radius + 0.35, Math.min(world.radius - 0.35, player.z + dz))
-  if (mode === 'spectator' || !collides(nextX, player.z, player.foot)) player.x = nextX
-  if (mode === 'spectator' || !collides(player.x, nextZ, player.foot)) player.z = nextZ
+  if (mode === 'spectator' || !collides(nextX, player.z, player.foot) && (!sneak || !player.grounded || hasSafeFooting(nextX, player.z, player.foot))) player.x = nextX
+  if (mode === 'spectator' || !collides(player.x, nextZ, player.foot) && (!sneak || !player.grounded || hasSafeFooting(player.x, nextZ, player.foot))) player.z = nextZ
 
   if (flying || mode === 'spectator') {
     player.velocityY = 0
@@ -1019,21 +1288,28 @@ function movePlayer(dt: number): void {
     return
   }
 
+  if (player.grounded) highestAirFoot = player.foot
+  else highestAirFoot = Math.max(highestAirFoot, player.foot)
   player.velocityY -= 17 * dt
   let nextFoot = player.foot + player.velocityY * dt
+  let fallDamage = 0
   player.grounded = false
   if (player.velocityY <= 0) {
     for (let top = Math.floor(player.foot); top >= Math.ceil(nextFoot); top--) {
       let supported = false
       for (const ox of [-0.26, 0.26]) {
         for (const oz of [-0.26, 0.26]) {
-          if (world.getBlock(Math.floor(player.x + ox), top - 1, Math.floor(player.z + oz))) supported = true
+          const support = world.getBlock(Math.floor(player.x + ox), top - 1, Math.floor(player.z + oz))
+          if (support && support !== 'fire' && !support.startsWith('painting_') && !support.startsWith('item_frame_')) supported = true
         }
       }
       if (supported) {
+        const fallDistance = highestAirFoot - top
         nextFoot = top
         player.velocityY = 0
         player.grounded = true
+        if (fallDistance > 3.4) fallDamage = Math.max(1, Math.floor((fallDistance - 3) * 2))
+        highestAirFoot = top
         break
       }
     }
@@ -1042,6 +1318,7 @@ function movePlayer(dt: number): void {
     player.velocityY = 0
   }
   player.foot = nextFoot
+  if (fallDamage > 0) receiveDamage(fallDamage)
   if (player.foot < -8) {
     player.x = 0.5
     player.z = 0.5
@@ -1058,7 +1335,7 @@ function openPanel(selector: string): void {
   $('#joystick-knob').style.transform = ''
   $(selector).classList.remove('hidden')
   if (selector === '#inventory-panel') { renderCatalog(); renderInventory() }
-  if (selector === '#craft-panel') renderRecipes()
+  if (selector === '#craft-panel') { renderCraftGrid(); renderRecipes() }
   if (selector === '#mob-panel') renderMobs()
   if (selector === '#journey-panel') renderJourney()
   if (selector === '#skin-panel') renderSkinGrid()
@@ -1080,6 +1357,7 @@ function closePanels(): void {
   $('#workshop-panel').classList.add('hidden')
   $('#lobby-panel').classList.add('hidden')
   $('#online-panel').classList.add('hidden')
+  $('#command-panel').classList.add('hidden')
   panelOpen = false
 }
 
@@ -1126,12 +1404,44 @@ $<HTMLInputElement>('#item-search').addEventListener('input', renderCatalog)
 $('#start-button').addEventListener('click', () => {
   playing = true
   $('#welcome').classList.add('hidden')
+  if (window.matchMedia('(pointer: coarse)').matches && screen.orientation?.lock) {
+    void screen.orientation.lock('landscape').catch(() => {
+      $('#landscape-hint').classList.toggle('hidden', window.innerWidth >= window.innerHeight)
+    })
+  }
   showToast('开始探索！对准方块试试挖掘')
 })
 $('#welcome-skin-button').addEventListener('click', () => openPanel('#skin-panel'))
 $('#menu-button').addEventListener('click', () => openPanel('#menu-panel'))
+$('#command-button').addEventListener('click', () => openPanel('#command-panel'))
+$('#command-run').addEventListener('click', () => {
+  const result = runChineseCommand($<HTMLInputElement>('#command-input').value)
+  $('#command-status').textContent = result
+  showToast(result)
+})
+$<HTMLInputElement>('#command-input').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') $('#command-run').click()
+})
 $('#transform-button').addEventListener('click', () => openPanel('#mob-panel'))
 $('#inventory-button').addEventListener('click', () => openPanel('#inventory-panel'))
+$('#eat-button').addEventListener('click', () => eatFood())
+$('#drop-button').addEventListener('click', () => dropFromSlot(selectedIndex, false))
+$('#inventory-drop-one').addEventListener('click', () => dropFromSlot(inventorySelection ?? selectedIndex, false))
+$('#inventory-drop-stack').addEventListener('click', () => dropFromSlot(inventorySelection ?? selectedIndex, true))
+$('#sprint-button').addEventListener('click', () => {
+  sprinting = !sprinting
+  if (sprinting) crouching = false
+  $('#sprint-button').setAttribute('aria-pressed', String(sprinting))
+  $('#crouch-button').setAttribute('aria-pressed', String(crouching))
+  showToast(sprinting ? '疾跑已开启' : '疾跑已关闭')
+})
+$('#crouch-button').addEventListener('click', () => {
+  crouching = !crouching
+  if (crouching) sprinting = false
+  $('#crouch-button').setAttribute('aria-pressed', String(crouching))
+  $('#sprint-button').setAttribute('aria-pressed', String(sprinting))
+  showToast(crouching ? '已蹲下：不会走出方块边缘' : '已站起')
+})
 $('#mob-list').addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-transform]')
   if (!button) {
@@ -1146,14 +1456,26 @@ $('#mob-list').addEventListener('click', (event) => {
     return
   }
   const kind = button.dataset.transform as MobKind | 'none'
-  if (kind !== 'none' && !unlockedMobs.has(kind)) return
   transform = kind === 'none' ? null : kind
+  itemForm = null
   health = transform ? mobInfo[transform].health : 40
   hunger = 20
+  updateFormAppearance()
   updateStatus()
   saveWorld()
   closePanels()
   showToast(transform ? `变成了${mobInfo[transform].name}` : '恢复玩家形态')
+})
+$<HTMLInputElement>('#morph-search').addEventListener('input', renderMorphItems)
+$('#morph-items').addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-item-morph]')
+  const id = button?.dataset.itemMorph
+  if (!id || !allItems[id]) return
+  itemForm = id
+  transform = null
+  health = 40
+  updateFormAppearance()
+  saveWorld(); closePanels(); showToast(`已变成${itemInfo(id).zh}`)
 })
 $('#craft-button').addEventListener('click', () => { closePanels(); openPanel('#craft-panel') })
 $('#journey-button').addEventListener('click', () => { closePanels(); openPanel('#journey-panel') })
@@ -1374,25 +1696,72 @@ $('#mode-button').addEventListener('click', () => {
   saveWorld()
   showToast(`已切换到${modeNames[mode]}模式`)
 })
-$('#camera-button').addEventListener('click', () => { thirdPerson = !thirdPerson; updateStatus(); showToast(thirdPerson ? '已切换第三人称' : '已切换第一人称') })
+$('#camera-button').addEventListener('click', () => {
+  cameraMode = ((cameraMode + 1) % 3) as 0 | 1 | 2
+  thirdPerson = cameraMode !== 0
+  updateStatus()
+  showToast(`已切换${['第一人称', '第三人称', '前置视角'][cameraMode]}`)
+})
 $('#flight-button').addEventListener('click', () => {
   if (mode !== 'creative' && mode !== 'spectator') return showToast('只有创造或旁观者模式可以飞行')
   flying = !flying
   updateStatus()
   showToast(flying ? '飞行已开启，抬头前进可上升' : '飞行已关闭')
 })
-$('#bench-less').addEventListener('click', () => { benchSize = Math.max(9, benchSize - 9); updateStatus(); renderRecipes(); saveWorld() })
-$('#bench-more').addEventListener('click', () => { benchSize = Math.min(3000, benchSize + 9); updateStatus(); renderRecipes(); saveWorld() })
+$('#bench-less').addEventListener('click', () => { benchSize = Math.max(9, benchSize - 9); renderCraftGrid(); renderRecipes(); saveWorld() })
+$('#bench-more').addEventListener('click', () => { benchSize = Math.min(3000, benchSize + 9); renderCraftGrid(); renderRecipes(); saveWorld() })
+$('#craft-mode').addEventListener('click', () => {
+  if (!usingWorkbench && !workbenchNearby()) return showToast('先用四块木板合成工作台，并放在身边')
+  usingWorkbench = !usingWorkbench
+  craftGrid = Array(usingWorkbench ? 9 : 4).fill(null)
+  renderCraftGrid(); renderRecipes()
+})
+$('#craft-materials').addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-craft-material]')
+  if (!button?.dataset.craftMaterial) return
+  craftChoice = button.dataset.craftMaterial
+  renderCraftGrid()
+})
+$('#craft-grid').addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-craft-cell]')
+  if (!button) return
+  const index = Number(button.dataset.craftCell)
+  const prior = craftGrid[index]
+  if (prior === craftChoice) craftGrid[index] = null
+  else if (craftChoice && craftGrid.filter((id) => id === craftChoice).length < countItem(inventory, craftChoice)) craftGrid[index] = craftChoice
+  else if (prior) craftGrid[index] = null
+  else return showToast('先选择背包里的材料')
+  renderCraftGrid()
+})
+$('#craft-grid-clear').addEventListener('click', () => { craftGrid.fill(null); renderCraftGrid() })
+$('#craft-grid-make').addEventListener('click', () => {
+  const match = matchingRecipe(craftGrid, usingWorkbench ? 3 : 2)
+  if (!match || !craft(inventory, match, craftCapacity())) return showToast('配方未匹配或材料不足')
+  experience += Math.max(1, Math.ceil(recipeSize(match) / 3))
+  showToast(`合成了${itemInfo(match.result).zh} ×${match.count}`)
+  craftGrid.fill(null); renderHotbar(); renderCraftGrid(); renderRecipes(); saveWorld()
+})
 $<HTMLInputElement>('#recipe-search').addEventListener('input', renderRecipes)
 $('#recipe-list').addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-craft]')
   if (!button) return
   const recipe = recipes[Number(button.dataset.craft)]
-  if (!recipe || !craft(inventory, recipe, benchSize)) return showToast('材料不足或背包已满')
+  if (!recipe || !recipeFits(recipe, usingWorkbench ? 3 : 2) && !usingWorkbench || !canCraft(inventory, recipe, craftCapacity())) return showToast('材料不足、背包已满，或需要工作台')
+  const width = usingWorkbench ? 3 : 2
+  if (recipeFits(recipe, width)) {
+    craftGrid = Array(width * width).fill(null)
+    if (recipe.shape) recipe.shape.forEach((row, y) => row.forEach((id, x) => { craftGrid[y * width + x] = id }))
+    else (recipe.ingredients ?? []).forEach((id, index) => { craftGrid[index] = id })
+    renderCraftGrid()
+    showToast('材料已填入格子，点击合成')
+    return
+  }
+  if (!craft(inventory, recipe, craftCapacity())) return showToast('材料不足或背包已满')
   showToast(`合成了${itemInfo(recipe.result).zh} ×${recipe.count}`)
   experience += Math.max(1, Math.ceil(recipeSize(recipe) / 3))
   renderHotbar()
   renderRecipes()
+  renderCraftGrid()
   updateStatus()
   saveWorld()
 })
@@ -1467,6 +1836,11 @@ function stopLook(event: PointerEvent): void {
 }
 renderer.domElement.addEventListener('pointerup', stopLook)
 renderer.domElement.addEventListener('pointercancel', stopLook)
+renderer.domElement.addEventListener('click', () => {
+  if (!playing || panelOpen) return
+  if (currentMob) showToast(`这是${mobInfo[currentMob.kind].name}`)
+  else if (currentTarget) showToast(`这是${BLOCKS.find((block) => block.id === currentTarget!.id)?.name ?? currentTarget.id}`)
+})
 
 window.addEventListener('keydown', (event) => {
   if (event.target instanceof HTMLInputElement) return
@@ -1476,8 +1850,11 @@ window.addEventListener('keydown', (event) => {
   if (key === ' ') jump()
   if (key === 'q') mine()
   if (key === 'e') place()
+  if (key === 'f') eatFood()
+  if (key === 'g') dropFromSlot(selectedIndex, false)
   if (key === 'i' && playing) panelOpen ? closePanels() : openPanel('#inventory-panel')
-  if (key >= '1' && key <= '8') { selectedIndex = Number(key) - 1; renderHotbar() }
+  if (key >= '1' && key <= '9') { selectedIndex = Number(key) - 1; renderHotbar() }
+  if (key === '0') { selectedIndex = 9; renderHotbar() }
 })
 window.addEventListener('keyup', (event) => keys.delete(event.key.length === 1 ? event.key.toLowerCase() : event.key))
 window.addEventListener('blur', () => keys.clear())
@@ -1492,6 +1869,9 @@ function resize(): void {
   camera.updateProjectionMatrix()
 }
 window.addEventListener('resize', resize)
+window.addEventListener('resize', () => {
+  $('#landscape-hint').classList.toggle('hidden', window.innerWidth >= window.innerHeight || !playing || !window.matchMedia('(pointer: coarse)').matches)
+})
 resize()
 
 let lastFrame = performance.now()
@@ -1500,6 +1880,8 @@ let clockTimer = 0
 let hungerTimer = 0
 let recoveryTimer = 0
 let onlineStateTimer = 0
+let fireTimer = 0
+let skyTimer = 1
 function animate(now: number): void {
   requestAnimationFrame(animate)
   const dt = Math.min((now - lastFrame) / 1000, 0.05)
@@ -1513,13 +1895,32 @@ function animate(now: number): void {
         online.send({ type: 'state', x: player.x, z: player.z, foot: player.foot, yaw: player.yaw, pitch: player.pitch, dimension: world.dimension })
       }
     }
-    const nextTime = timeOfDay + dt / 480
+    const nextTime = timeOfDay + dt / (DAY_DURATION + NIGHT_DURATION)
     if (nextTime >= 1) day++
     timeOfDay = nextTime % 1
     saveTimer += dt
     if (saveTimer > 10) { saveTimer = 0; saveWorld() }
-    const dark = world.dimension !== 'overworld' || Math.sin(timeOfDay * Math.PI * 2) < 0.12
+    const dark = world.dimension !== 'overworld' || timeOfDay >= DAY_END
     entities.tick(dt, player.x, player.z, dark, world.dimension, receiveDamage)
+    fireTimer += dt
+    if (fireTimer >= 1) {
+      fireTimer = 0
+      const px = Math.floor(player.x), pz = Math.floor(player.z)
+      if ([Math.floor(player.foot), Math.floor(player.foot + 1)].some((y) => world.getBlock(px, y, pz) === 'fire')) receiveDamage(2)
+    }
+    for (let i = droppedItems.length - 1; i >= 0; i--) {
+      const drop = droppedItems[i]
+      drop.mesh.visible = drop.dimension === world.dimension
+      if (!drop.mesh.visible) continue
+      drop.mesh.position.set(drop.x, world.surfaceTop(Math.floor(drop.x), Math.floor(drop.z)) + 0.35 + Math.sin(now * 0.003 + i) * 0.12, drop.z)
+      drop.mesh.rotation.y += dt
+      if (now < drop.pickupAfter || Math.hypot(player.x - drop.x, player.z - drop.z) > 1.05) continue
+      const remaining = addItem(inventory, drop.id, drop.count)
+      if (remaining === drop.count) continue
+      if (remaining) drop.count = remaining
+      else { scene.remove(drop.mesh); drop.mesh.geometry.dispose(); (drop.mesh.material as THREE.Material).dispose(); droppedItems.splice(i, 1) }
+      renderHotbar(); saveWorld(); showToast(`捡起了${itemInfo(drop.id).zh}`)
+    }
     if (activeMiniGame === 'treasure' && Math.hypot(player.x - 12, player.z - 12) < 2) advanceMiniGame('treasure')
     if (mode === 'survival' || mode === 'hardcore') {
       hungerTimer += dt
@@ -1536,27 +1937,46 @@ function animate(now: number): void {
   updateCamera()
   updateTarget()
 
-  const daylight = Math.max(0, Math.sin(timeOfDay * Math.PI * 2))
+  const solarAngle = timeOfDay < DAY_END ? timeOfDay / DAY_END * Math.PI
+    : Math.PI + (timeOfDay - DAY_END) / (1 - DAY_END) * Math.PI
+  const daylight = Math.max(0, Math.sin(solarAngle))
   const lightMix = Math.max(0.12, daylight)
   const sky = world.dimension === 'nether' ? new THREE.Color('#513437')
     : world.dimension === 'end' ? new THREE.Color('#312a47')
       : world.dimension === 'end_city' ? new THREE.Color('#514060')
         : nightSky.clone().lerp(daySky, lightMix)
-  scene.background = sky
+  skyTimer += dt
+  if (skyTimer >= 0.5) {
+    skyTimer = 0
+    const upper = world.dimension === 'overworld' ? new THREE.Color('#2364a2').lerp(nightSky, 1 - daylight) : sky.clone().multiplyScalar(0.65)
+    const horizon = world.dimension === 'overworld' ? new THREE.Color('#e4ecca').lerp(nightSky, 1 - Math.max(0.1, daylight)) : sky.clone()
+    const gradient = skyContext.createLinearGradient(0, 0, 0, 256)
+    gradient.addColorStop(0, upper.getStyle())
+    gradient.addColorStop(0.68, sky.getStyle())
+    gradient.addColorStop(1, horizon.getStyle())
+    skyContext.fillStyle = gradient
+    skyContext.fillRect(0, 0, 512, 256)
+    if (world.dimension === 'overworld' && daylight < 0.15) {
+      skyContext.fillStyle = `rgba(255,255,238,${(0.15 - daylight) / 0.15 * 0.8})`
+      for (let i = 0; i < 80; i++) skyContext.fillRect((i * 37 + i * i * 13) % 512, (i * 53 + i * i * 7) % 169, 1, 1)
+    }
+    skyTexture.needsUpdate = true
+  }
   if (scene.fog) scene.fog.color.copy(sky)
   ambient.intensity = world.dimension === 'overworld' ? 0.8 + daylight * (ownedMods.has('shader') ? 2 : 1.3) : 1.4
   sunlight.intensity = world.dimension === 'overworld' ? 0.25 + daylight * 1.85 : 0.6
-  sunlight.position.set(Math.cos(timeOfDay * Math.PI * 2) * 30, Math.sin(timeOfDay * Math.PI * 2) * 28, -12)
+  sunlight.position.set(Math.cos(solarAngle) * 30, Math.sin(solarAngle) * 28, -12)
   sun.visible = world.dimension === 'overworld' && daylight > 0.05
   moon.visible = world.dimension === 'overworld' && daylight <= 0.05
-  sun.position.set(player.x + Math.cos(timeOfDay * Math.PI * 2) * 50, Math.sin(timeOfDay * Math.PI * 2) * 45, player.z - 30)
-  moon.position.set(player.x - Math.cos(timeOfDay * Math.PI * 2) * 50, -Math.sin(timeOfDay * Math.PI * 2) * 45, player.z - 30)
+  sun.position.set(player.x + Math.cos(solarAngle) * 50, Math.sin(solarAngle) * 45, player.z - 30)
+  moon.position.set(player.x - Math.cos(solarAngle) * 50, -Math.sin(solarAngle) * 45, player.z - 30)
   clouds.forEach((cloud, i) => { cloud.position.x += dt * (0.15 + i * 0.01); if (cloud.position.x > 45) cloud.position.x = -45 })
   clockTimer += dt
   if (clockTimer > 0.5) {
     clockTimer = 0
-    const totalMinutes = Math.floor(((timeOfDay + 0.25) % 1) * 24 * 60)
-    $('#clock').textContent = `${daylight > 0.12 ? '☀' : '☾'} 第 ${day} 天 · ${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`
+    const hours = timeOfDay < DAY_END ? 6 + timeOfDay / DAY_END * 12 : 18 + (timeOfDay - DAY_END) / (1 - DAY_END) * 12
+    const totalMinutes = Math.floor(hours * 60) % 1440
+    $('#clock').textContent = `${timeOfDay < DAY_END ? '☀' : '☾'} 第 ${day} 天 · ${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`
   }
   renderer.render(scene, camera)
 }

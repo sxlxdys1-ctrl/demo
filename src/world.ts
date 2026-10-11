@@ -19,6 +19,8 @@ export const BLOCKS: BlockInfo[] = [
   { id: 'stone_bricks', name: '石砖', english: 'stone bricks', color: '#a2a09c' },
   { id: 'end_portal_frame', name: '末地传送门框架', english: 'end portal frame', color: '#5a8b79' },
   { id: 'purpur_block', name: '紫珀块', english: 'purpur block', color: '#b98dbd' },
+  { id: 'crafting_table', name: '工作台', english: 'crafting table', color: '#b78354' },
+  { id: 'fire', name: '火焰', english: 'fire', color: '#f49436' },
   ...(['east', 'west', 'north', 'south'] as const).flatMap((direction) => [
     { id: `painting_${direction}`, name: '画', english: 'painting', color: '#a67251' },
     { id: `item_frame_${direction}`, name: '物品展示框', english: 'item frame', color: '#ad824d' },
@@ -29,15 +31,83 @@ export type BlockId = string
 export type Dimension = 'overworld' | 'nether' | 'end' | 'end_city'
 type Voxel = BlockId | null
 
-const blockColor = new Map<BlockId, THREE.Color>(
-  BLOCKS.map((block) => [block.id, new THREE.Color(block.color)]),
-)
+function makeAtlas(): THREE.CanvasTexture {
+  const width = 512
+  const height = Math.ceil((BLOCKS.length + 2) / 32) * 16
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')!
+  const image = context.createImageData(width, height)
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const offset = (y * width + x) * 4
+    image.data[offset] = image.data[offset + 1] = image.data[offset + 2] = image.data[offset + 3] = 255
+  }
+  BLOCKS.forEach((block, index) => {
+    const bx = ((index + 1) % 32) * 16
+    const by = Math.floor((index + 1) / 32) * 16
+    const raw = block.color.slice(1)
+    const base = [0, 2, 4].map((offset) => parseInt(raw.slice(offset, offset + 2), 16))
+    let seed = [...block.id].reduce((sum, char) => (sum * 33 + char.charCodeAt(0)) >>> 0, 5381)
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      const grain = (seed & 255) / 255
+      let rgb = base
+      let shade = 0.78 + grain * 0.43
+      if (block.id === 'wood') { rgb = x % 4 === 0 ? [102, 70, 41] : [174, 129, 81]; shade = 0.88 + grain * 0.22 }
+      if (block.id === 'brick' || block.id === 'nether_bricks') {
+        const seam = y % 5 === 0 || (x + (Math.floor(y / 5) % 2) * 7) % 8 === 0
+        if (seam) shade *= 0.55
+      }
+      if (block.id === 'crafting_table' && (x === 1 || x === 8 || x === 15 || y === 1 || y === 8 || y === 15)) shade *= 0.58
+      if (block.id === 'fire') { rgb = grain > y / 19 ? [255, 207, 89] : [235, 101, 44]; shade = 1 }
+      const offset = ((by + y) * width + bx + x) * 4
+      for (let c = 0; c < 3; c++) image.data[offset + c] = Math.min(255, rgb[c] * shade)
+      image.data[offset + 3] = 255
+    }
+  })
+  const grassSideTile = BLOCKS.length + 1
+  const gx = grassSideTile % 32 * 16, gy = Math.floor(grassSideTile / 32) * 16
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const offset = ((gy + y) * width + gx + x) * 4
+    const rgb = y < 4 ? [104, 172, 78] : [140, 98, 69]
+    const shade = 0.86 + ((x * 17 + y * 29) % 9) / 40
+    for (let c = 0; c < 3; c++) image.data[offset + c] = rgb[c] * shade
+    image.data[offset + 3] = 255
+  }
+  context.putImageData(image, 0, 0)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.magFilter = THREE.NearestFilter
+  texture.minFilter = THREE.NearestFilter
+  return texture
+}
 
 export function registerCustomBlock(id: string, name: string, color: string): boolean {
   if (!/^custom_[a-z0-9_]{1,36}$/.test(id) || !/^#[0-9a-fA-F]{6}$/.test(color) || BLOCKS.some((block) => block.id === id)) return false
   BLOCKS.push({ id, name: name.slice(0, 24), english: id, color })
-  blockColor.set(id, new THREE.Color(color))
   return true
+}
+
+export function registerCatalogBlock(id: string, name: string): void {
+  if (BLOCKS.some((block) => block.id === id)) return
+  const dyes: Record<string, string> = {
+    white: '#e9e7df', light_gray: '#a5a6a4', gray: '#65666a', black: '#333238', brown: '#77533c',
+    red: '#b7584e', orange: '#d99050', yellow: '#e6ca63', lime: '#9bc36a', green: '#5c936a',
+    cyan: '#62afb0', light_blue: '#87c8db', blue: '#5577b7', purple: '#9875b6', magenta: '#c978ae', pink: '#e4a4b8',
+  }
+  const dye = Object.keys(dyes).sort((a, b) => b.length - a.length).find((key) => id.startsWith(key + '_'))
+  const color = dye ? dyes[dye] : /planks|_log|_wood|bookshelf|barrel|chest/.test(id) ? '#aa8055'
+    : /leaves|moss|grass|vine|sapling|flower|bamboo/.test(id) ? '#6fa05b'
+      : /sand|sandstone|end_stone/.test(id) ? '#d7c492'
+        : /brick|terracotta|mud/.test(id) ? '#a66d5a'
+          : /gold|honey/.test(id) ? '#e3bd59'
+            : /copper/.test(id) ? '#bf8769'
+              : /diamond|prismarine/.test(id) ? '#72c5c4'
+                : /nether|crimson|netherrack/.test(id) ? '#8b5154'
+                  : /obsidian|blackstone|deepslate/.test(id) ? '#51505c'
+                    : /glass|ice/.test(id) ? '#b3dadd' : '#a4a5a0'
+  BLOCKS.push({ id, name, english: id.replaceAll('_', ' '), color })
 }
 
 const faces = [
@@ -63,14 +133,16 @@ export class VoxelWorld {
   readonly edits = new Map<string, Voxel>()
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>
   readonly radius = 20
+  private atlasSize = 0
   dimension: Dimension
 
   constructor(dimension: Dimension = 'overworld') {
     this.dimension = dimension
     this.mesh = new THREE.Mesh(
       new THREE.BufferGeometry(),
-      new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+      new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, map: makeAtlas() }),
     )
+    this.atlasSize = BLOCKS.length
     this.mesh.receiveShadow = true
     this.generate()
   }
@@ -173,15 +245,34 @@ export class VoxelWorld {
   }
 
   surfaceTop(x: number, z: number): number {
-    for (let y = 25; y >= 0; y--) if (this.getBlock(x, y, z)) return y + 1
+    for (let y = 25; y >= 0; y--) {
+      const block = this.getBlock(x, y, z)
+      if (block && block !== 'fire' && !block.startsWith('painting_') && !block.startsWith('item_frame_')) return y + 1
+    }
     return 0
   }
 
   rebuild(): void {
+    if (this.atlasSize !== BLOCKS.length) {
+      this.mesh.material.map?.dispose()
+      this.mesh.material.map = makeAtlas()
+      this.mesh.material.needsUpdate = true
+      this.atlasSize = BLOCKS.length
+    }
     const positions: number[] = []
     const colors: number[] = []
     const normals: number[] = []
+    const uvs: number[] = []
     const indices: number[] = []
+    const atlasRows = Math.ceil((BLOCKS.length + 2) / 32)
+    const addUvs = (tile: number): void => {
+      const col = tile % 32, row = Math.floor(tile / 32)
+      const u0 = (col * 16 + 0.3) / 512, u1 = (col * 16 + 15.7) / 512
+      const v0 = 1 - (row * 16 + 15.7) / (atlasRows * 16)
+      const v1 = 1 - (row * 16 + 0.3) / (atlasRows * 16)
+      uvs.push(u0, v0, u0, v1, u1, v1, u1, v0)
+    }
+    const textureIndex = new Map(BLOCKS.map((block, index) => [block.id, index + 1]))
 
     const addDecorQuad = (x: number, y: number, z: number, direction: string,
       size: number, offset: number, color: string): void => {
@@ -199,6 +290,7 @@ export class VoxelWorld {
         }
         colors.push(tint.r, tint.g, tint.b)
       }
+      addUvs(0)
       if (direction === 'east' || direction === 'north') indices.push(vertex, vertex + 2, vertex + 1, vertex, vertex + 3, vertex + 2)
       else indices.push(vertex, vertex + 1, vertex + 2, vertex, vertex + 2, vertex + 3)
     }
@@ -214,7 +306,6 @@ export class VoxelWorld {
         if (painting) addDecorQuad(x, y, z, direction, 0.3, 0.068, '#e6ac77')
         continue
       }
-      const baseColor = blockColor.get(type) ?? new THREE.Color('#c4a9cb')
       for (const face of faces) {
         const [dx, dy, dz] = face.direction
         if (this.getBlock(x + dx, y + dy, z + dz)) continue
@@ -222,8 +313,9 @@ export class VoxelWorld {
         for (const [cx, cy, cz] of face.corners) {
           positions.push(x + cx, y + cy, z + cz)
           normals.push(dx, dy, dz)
-          colors.push(baseColor.r * face.shade, baseColor.g * face.shade, baseColor.b * face.shade)
+          colors.push(face.shade, face.shade, face.shade)
         }
+        addUvs((type === 'grass' || type === 'grass_block') && dy !== 1 ? BLOCKS.length + 1 : textureIndex.get(type) ?? 0)
         indices.push(vertex, vertex + 1, vertex + 2, vertex, vertex + 2, vertex + 3)
       }
     }
@@ -232,6 +324,7 @@ export class VoxelWorld {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
     geometry.setIndex(indices)
     geometry.computeBoundingSphere()
     this.mesh.geometry.dispose()

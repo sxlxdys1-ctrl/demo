@@ -34,7 +34,7 @@ function part(width: number, height: number, depth: number, color: number, x: nu
   return mesh
 }
 
-function makeMob(kind: MobKind): THREE.Group {
+export function makeMob(kind: MobKind): THREE.Group {
   const info = mobInfo[kind]
   const group = new THREE.Group()
   const big = kind === 'ender_dragon'

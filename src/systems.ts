@@ -2,6 +2,8 @@ import vanillaItems from './data/items.json'
 import vanillaRecipes from './data/recipes.json'
 
 export type ItemId = string
+export const INVENTORY_SIZE = 400
+export const HOTBAR_SIZE = 10
 export type ItemStack = { id: ItemId; count: number }
 export type Inventory = (ItemStack | null)[]
 export type Recipe = {
@@ -63,13 +65,13 @@ export function itemInfo(id: ItemId): ItemInfo {
 }
 
 export function emptyInventory(): Inventory {
-  return Array.from({ length: 80 }, () => null)
+  return Array.from({ length: INVENTORY_SIZE }, () => null)
 }
 
 export function normalizeInventory(raw: unknown): Inventory {
   const result = emptyInventory()
   if (!Array.isArray(raw)) return result
-  for (let i = 0; i < Math.min(80, raw.length); i++) {
+  for (let i = 0; i < Math.min(INVENTORY_SIZE, raw.length); i++) {
     const slot = raw[i]
     if (typeof slot === 'string' && allItems[slot]) result[i] = { id: slot, count: 64 }
     else if (slot && typeof slot === 'object' && typeof slot.id === 'string' &&
@@ -127,6 +129,29 @@ export function recipeNeeds(recipe: Recipe): Map<ItemId, number> {
 
 export function recipeSize(recipe: Recipe): number {
   return [...recipeNeeds(recipe).values()].reduce((sum, count) => sum + count, 0)
+}
+
+export function recipeFits(recipe: Recipe, width: number): boolean {
+  if (recipeSize(recipe) > width * width) return false
+  return !recipe.shape || recipe.shape.length <= width && recipe.shape.every((row) => row.length <= width)
+}
+
+export function matchingRecipe(grid: (ItemId | null)[], width: number): Recipe | undefined {
+  const filled = grid.filter((id): id is ItemId => !!id)
+  return recipes.find((recipe) => {
+    if (!recipeFits(recipe, width) || recipeSize(recipe) !== filled.length) return false
+    if (!recipe.shape) {
+      const supplied = new Map<ItemId, number>()
+      for (const id of filled) supplied.set(id, (supplied.get(id) ?? 0) + 1)
+      return [...recipeNeeds(recipe)].every(([id, count]) => supplied.get(id) === count)
+    }
+    for (let oy = 0; oy <= width - recipe.shape.length; oy++) {
+      for (let ox = 0; ox <= width - recipe.shape[0].length; ox++) {
+        if (grid.every((id, index) => id === (recipe.shape?.[Math.floor(index / width) - oy]?.[index % width - ox] ?? null))) return true
+      }
+    }
+    return false
+  })
 }
 
 export function canCraft(inventory: Inventory, recipe: Recipe, capacity: number): boolean {
