@@ -21,7 +21,7 @@ npm ci
 npm run dev
 ```
 
-在开发机打开 Vite 显示的网址。若要在手机上通过局域网访问，开发机与手机需处于同一网络，并使用开发机的局域网地址。正式对外访问需要将 `npm run build` 生成的 `dist/` 部署到 HTTPS 静态网站。仓库带有 GitHub Pages 工作流；在 GitHub 中启用 Pages 的 GitHub Actions 来源后，推送到 `main` 会触发发布。
+在开发机打开 Vite 显示的网址。若要在手机上通过局域网访问，开发机与手机需处于同一网络，并使用开发机的局域网地址。正式对外访问需要将 `npm run build` 生成的 `dist/` 部署到 HTTPS 静态网站。仓库带有 GitHub Pages 工作流；在 GitHub 中启用 Pages 的 GitHub Actions 来源后，手动运行一次 **Publish mobile game** 工作流。之后推送到 `main` 会自动发布。
 
 ```bash
 npm run build
