@@ -36,7 +36,7 @@ app.innerHTML = `
   <div class="grain" aria-hidden="true"></div>
   <header class="topbar">
     <div class="brand"><span class="brand-mark">✦</span><div><strong>超级好玩的小世界</strong><small>手机浏览器 · 探索先行版</small></div></div>
-    <div class="top-actions"><button id="transform-button" class="icon-button" aria-label="生物变身">⚔</button><span id="clock" class="glass-pill">☀ 第 1 天 · 12:00</span><button id="menu-button" class="icon-button" aria-label="打开菜单">☰</button></div>
+    <div class="top-actions"><button id="transform-button" class="icon-button" aria-label="生物变身">⚔</button><span id="clock" class="glass-pill">☀ 第 1 天 · 12:00</span><button id="fullscreen-button" class="icon-button fullscreen-button" aria-label="进入全屏" title="全屏游玩"><span aria-hidden="true">⛶</span><small>全屏</small></button><button id="menu-button" class="icon-button" aria-label="打开菜单">☰</button></div>
   </header>
   <div id="target-label" class="target-label">滑动屏幕，环顾四周</div>
   <div class="crosshair" aria-hidden="true"><i></i><i></i><b></b></div>
@@ -63,7 +63,7 @@ app.innerHTML = `
       <h1>超级好玩的<br><em>小世界</em></h1>
       <p>从一块草地开始，挖出你的灵感，搭起独一无二的小天地。</p>
       <div class="instruction-row"><span>◉ 左边摇杆移动</span><span>↔ 右边滑动视角</span></div>
-      <button id="start-button" class="primary-button">进入我的世界 <span>→</span></button>
+      <button id="start-button" class="primary-button">全屏进入我的世界 <span>→</span></button>
       <button id="welcome-skin-button" class="menu-option">制作皮肤 <span>✎</span></button>
       <small class="welcome-note">进度保存在此浏览器中 · 建议横屏探索</small>
     </div>
@@ -605,6 +605,41 @@ function showToast(message: string): void {
   toast.classList.add('visible')
   window.clearTimeout(toastTimer)
   toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2200)
+}
+
+function updateLandscapeHint(): void {
+  $('#landscape-hint').classList.toggle('hidden', window.innerWidth >= window.innerHeight || !playing || !window.matchMedia('(pointer: coarse)').matches)
+}
+
+function updateFullscreenButton(): void {
+  const active = document.fullscreenElement === app
+  const button = $<HTMLButtonElement>('#fullscreen-button')
+  button.setAttribute('aria-label', active ? '退出全屏' : '进入全屏')
+  button.title = active ? '退出全屏' : '全屏游玩'
+  button.querySelector('span')!.textContent = active ? '⤢' : '⛶'
+  button.querySelector('small')!.textContent = active ? '退出' : '全屏'
+  resize()
+  updateLandscapeHint()
+}
+
+async function enterFullscreen(): Promise<void> {
+  if (document.fullscreenElement === app) return
+  if (!app.requestFullscreen) {
+    showToast('当前浏览器不支持网页全屏，可尝试“添加到主屏幕”')
+    updateLandscapeHint()
+    return
+  }
+  try {
+    await app.requestFullscreen({ navigationUI: 'hide' })
+  } catch {
+    showToast('浏览器未允许全屏，请点右上角“全屏”重试')
+    updateLandscapeHint()
+    return
+  }
+  if (window.matchMedia('(pointer: coarse)').matches && screen.orientation?.lock) {
+    void screen.orientation.lock('landscape').catch(updateLandscapeHint)
+  }
+  updateFullscreenButton()
 }
 
 function updateCamera(): void {
@@ -1408,14 +1443,15 @@ $<HTMLInputElement>('#item-search').addEventListener('input', renderCatalog)
 $('#start-button').addEventListener('click', () => {
   playing = true
   $('#welcome').classList.add('hidden')
-  if (window.matchMedia('(pointer: coarse)').matches && screen.orientation?.lock) {
-    void screen.orientation.lock('landscape').catch(() => {
-      $('#landscape-hint').classList.toggle('hidden', window.innerWidth >= window.innerHeight)
-    })
-  }
+  void enterFullscreen()
   showToast('开始探索！对准方块试试挖掘')
 })
 $('#welcome-skin-button').addEventListener('click', () => openPanel('#skin-panel'))
+$('#fullscreen-button').addEventListener('click', () => {
+  if (document.fullscreenElement === app) void document.exitFullscreen().catch(() => showToast('无法退出全屏'))
+  else void enterFullscreen()
+})
+document.addEventListener('fullscreenchange', updateFullscreenButton)
 $('#menu-button').addEventListener('click', () => openPanel('#menu-panel'))
 $('#command-button').addEventListener('click', () => openPanel('#command-panel'))
 $('#command-run').addEventListener('click', () => {
@@ -1866,16 +1902,13 @@ window.addEventListener('beforeunload', saveWorld)
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveWorld() })
 
 function resize(): void {
-  const width = window.innerWidth
-  const height = window.innerHeight
+  const { width, height } = app.getBoundingClientRect()
   renderer.setSize(width, height)
   camera.aspect = width / height
   camera.updateProjectionMatrix()
 }
 window.addEventListener('resize', resize)
-window.addEventListener('resize', () => {
-  $('#landscape-hint').classList.toggle('hidden', window.innerWidth >= window.innerHeight || !playing || !window.matchMedia('(pointer: coarse)').matches)
-})
+window.addEventListener('resize', updateLandscapeHint)
 resize()
 
 let lastFrame = performance.now()
