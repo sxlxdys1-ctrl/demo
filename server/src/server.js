@@ -32,6 +32,7 @@ const text = (value, max = 60) => typeof value === 'string' ? value.trim().slice
 const validDimension = (value) => ['overworld', 'nether', 'end', 'end_city'].includes(value)
 const validUUID = (value) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
 const validPosition = (x, y, z) => [x, y, z].every(Number.isInteger) && x >= -20 && x < 20 && z >= -20 && z < 20 && y >= 0 && y <= 25
+const mobKinds = new Set(['chicken', 'sheep', 'cow', 'pig', 'zombie', 'skeleton', 'hammer_brute', 'blaze', 'piglin', 'enderman', 'ender_dragon'])
 const authAttempts = new Map()
 function limitAuth(req, res, next) {
   const now = Date.now()
@@ -293,11 +294,17 @@ sockets.on('connection', (socket) => {
   socket.worldId = null
   socket.messageCredits = 40
   socket.creditUpdatedAt = Date.now()
+  socket.lastJoinAt = 0
   const authTimeout = setTimeout(() => { if (!socket.user) socket.close(1008, '请先登录') }, 5000)
   socket.on('message', async (raw) => {
     try {
       const now = Date.now()
+      socket.messageCredits = Math.min(40, socket.messageCredits + (now - socket.creditUpdatedAt) * 0.03)
+      socket.creditUpdatedAt = now
+      if (socket.messageCredits < 1) return
+      socket.messageCredits -= 1
       const message = JSON.parse(raw.toString())
+      if (!message || typeof message !== 'object' || Array.isArray(message)) return
       if (message.type === 'auth') {
         if (socket.user) return
         socket.user = await getSession(db, message.token)
@@ -308,6 +315,8 @@ sockets.on('connection', (socket) => {
       if (!socket.user) return socket.close(1008, '请先登录')
       if (message.type === 'join') {
         if (!validUUID(message.worldId)) return
+        if (now - socket.lastJoinAt < 2000) return
+        socket.lastJoinAt = now
         const access = await db.query(`SELECT w.id FROM worlds w LEFT JOIN world_members m ON m.world_id = w.id AND m.user_id = $2
           WHERE w.id = $1 AND (w.owner_id = $2 OR (w.is_open = true AND m.user_id = $2))`, [message.worldId, socket.user.id])
         if (!access.rowCount) return send(socket, { type: 'error', message: '没有进入这个世界的权限' })
@@ -322,10 +331,6 @@ sockets.on('connection', (socket) => {
         return
       }
       if (!socket.worldId) return
-      socket.messageCredits = Math.min(40, socket.messageCredits + (now - socket.creditUpdatedAt) * 0.03)
-      socket.creditUpdatedAt = now
-      if (socket.messageCredits < 1) return
-      socket.messageCredits -= 1
       if (message.type === 'state') {
         const { x, z, foot, yaw, pitch } = message
         if (![x, z, foot, yaw, pitch].every(Number.isFinite) || Math.abs(x) > 21 || Math.abs(z) > 21 || foot < -8 || foot > 26) return
@@ -340,7 +345,7 @@ sockets.on('connection', (socket) => {
       }
       if (message.type === 'spawn') {
         const { dimension, kind, x, z } = message
-        if (!validDimension(dimension) || typeof kind !== 'string' || !/^[a-z_]{1,30}$/.test(kind) || ![x, z].every(Number.isFinite) || Math.abs(x) > 20 || Math.abs(z) > 20) return
+        if (!validDimension(dimension) || !mobKinds.has(kind) || ![x, z].every(Number.isFinite) || Math.abs(x) > 20 || Math.abs(z) > 20) return
         const id = newId()
         await db.query('INSERT INTO world_entities(id,world_id,dimension,kind,x,z) VALUES($1,$2,$3,$4,$5,$6)', [id, socket.worldId, dimension, kind, x, z])
         return broadcast(socket.worldId, { type: 'spawn', id, dimension, kind, x, z }, socket)

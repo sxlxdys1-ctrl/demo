@@ -111,10 +111,10 @@ app.innerHTML = `
       <button id="menu-fullscreen-button" class="menu-option">全屏显示 <span>⛶</span></button>
       <div class="view-settings">
         <label for="view-zoom">地图视野缩放 <output id="view-zoom-label">120%</output></label>
-        <input id="view-zoom" type="range" min="0.5" max="1.8" step="0.05" value="1.2" aria-label="地图视野缩放" />
+        <input id="view-zoom" type="range" min="0.25" max="1.8" step="0.05" value="1.2" aria-label="地图视野缩放" />
         <label for="ui-size">按钮和快捷栏大小 <output id="ui-size-label">110%</output></label>
-        <input id="ui-size" type="range" min="0.9" max="1.3" step="0.05" value="1.1" aria-label="按钮和快捷栏大小" />
-        <small>向左调到 50% 可看得更远；双指捏合也能缩放。俯瞰模式能一眼看到更大地图。</small>
+        <input id="ui-size" type="range" min="1.1" max="1.3" step="0.05" value="1.1" aria-label="按钮和快捷栏大小" />
+        <small>视野可调到 25%；双指捏合只改变地图视野，不会缩小按钮和快捷栏。按钮大小可单独调节。</small>
       </div>
       <button id="command-button" class="menu-option">中文指令 <span>输入</span></button>
       <button id="flight-button" class="menu-option">飞行 <span id="flight-label">关闭</span></button>
@@ -308,32 +308,44 @@ function readSave(): SaveData | null {
     const data: unknown = JSON.parse(current || localStorage.getItem(OLD_SAVE_KEY) || 'null')
     if (!data || typeof data !== 'object' || !('version' in data) || ![1, 2].includes(Number(data.version))) return null
     const save = data as SaveData
-    if (!Array.isArray(save.edits) || !Array.isArray(save.inventory)) return null
+    if (!Array.isArray(save.inventory)) return null
     if (!save.player || ![save.player.x, save.player.z, save.player.foot, save.player.yaw, save.player.pitch].every(Number.isFinite)) return null
+    const normalizeEdits = (value: unknown): [string, BlockId | null][] => Array.isArray(value)
+      ? value.filter((entry): entry is [string, BlockId | null] => Array.isArray(entry) && entry.length === 2 &&
+        typeof entry[0] === 'string' && /^-?\d+,-?\d+,-?\d+$/.test(entry[0]) &&
+        (entry[1] === null || typeof entry[1] === 'string' && /^[a-z0-9_]{1,64}$/.test(entry[1]))) : []
+    const edits = normalizeEdits(save.edits)
+    const dimensionEdits: SaveData['editsByDimension'] = {}
+    for (const dimension of ['overworld', 'nether', 'end', 'end_city'] as Dimension[]) {
+      const entries = save.editsByDimension?.[dimension]
+      if (Array.isArray(entries)) dimensionEdits[dimension] = normalizeEdits(entries)
+    }
+    dimensionEdits.overworld ??= edits
     const validMods = Array.isArray(save.customMods) ? save.customMods.filter((mod): mod is { id: string; name: string; color: string } =>
       !!mod && /^custom_[a-z0-9_]{1,36}$/.test(mod.id) && typeof mod.name === 'string' && /^#[0-9a-fA-F]{6}$/.test(mod.color)).slice(0, 100) : []
     for (const mod of validMods) allItems[mod.id] = { zh: mod.name, en: mod.name, stack: 64 }
     return {
       ...save,
       version: 2,
+      edits,
+      editsByDimension: dimensionEdits,
       inventory: normalizeInventory(save.inventory.map((slot) => typeof slot === 'string' ? blockItems[slot as BlockId] ?? slot : slot)),
-      mode: save.version === 2 && save.mode in modeNames ? save.mode : 'creative',
-      health: Number.isFinite(save.health) ? Math.max(0, Math.min(save.transform && save.transform in mobInfo ? mobInfo[save.transform].health : 40, save.health)) : 40,
+      mode: save.version === 2 && Object.hasOwn(modeNames, save.mode) ? save.mode : 'creative',
+      health: Number.isFinite(save.health) ? Math.max(0, Math.min(save.transform && Object.hasOwn(mobInfo, save.transform) ? mobInfo[save.transform].health : 40, save.health)) : 40,
       hunger: Number.isFinite(save.hunger) ? Math.max(0, Math.min(20, save.hunger)) : 20,
       experience: Number.isFinite(save.experience) ? Math.max(0, save.experience) : 0,
-      viewZoom: Number.isFinite(save.viewZoom) ? Math.max(0.5, Math.min(1.8, save.viewZoom!)) : 1.2,
-      uiScale: Number.isFinite(save.uiScale) ? Math.max(0.9, Math.min(1.3, save.uiScale!)) : 1.1,
+      viewZoom: Number.isFinite(save.viewZoom) ? Math.max(0.25, Math.min(1.8, save.viewZoom!)) : 1.2,
+      uiScale: Number.isFinite(save.uiScale) ? Math.max(1.1, Math.min(1.3, save.uiScale!)) : 1.1,
       cameraMode: [0, 1, 2, 3].includes(save.cameraMode ?? -1) ? save.cameraMode : 0,
       benchSize: Number.isInteger(save.benchSize) ? Math.max(9, Math.min(3000, save.benchSize)) : 9,
-      unlockedMobs: Array.isArray(save.unlockedMobs) ? save.unlockedMobs.filter((id): id is MobKind => id in mobInfo) : [],
-      transform: save.transform && save.transform in mobInfo ? save.transform : null,
-      itemForm: typeof save.itemForm === 'string' && allItems[save.itemForm] ? save.itemForm : null,
-      drops: Array.isArray(save.drops) ? save.drops.filter((drop) => drop && typeof drop.id === 'string' && allItems[drop.id] &&
+      unlockedMobs: Array.isArray(save.unlockedMobs) ? save.unlockedMobs.filter((id): id is MobKind => typeof id === 'string' && Object.hasOwn(mobInfo, id)) : [],
+      transform: save.transform && Object.hasOwn(mobInfo, save.transform) ? save.transform : null,
+      itemForm: typeof save.itemForm === 'string' && Object.hasOwn(allItems, save.itemForm) ? save.itemForm : null,
+      drops: Array.isArray(save.drops) ? save.drops.filter((drop) => drop && typeof drop.id === 'string' && Object.hasOwn(allItems, drop.id) &&
         Number.isInteger(drop.count) && drop.count > 0 && drop.count <= itemInfo(drop.id).stack &&
         Number.isFinite(drop.x) && Number.isFinite(drop.z) && Math.abs(drop.x) < 20 && Math.abs(drop.z) < 20 &&
         ['overworld', 'nether', 'end', 'end_city'].includes(drop.dimension)).slice(0, 100) : [],
       dimension: ['overworld', 'nether', 'end', 'end_city'].includes(save.dimension) ? save.dimension : 'overworld',
-      editsByDimension: save.editsByDimension && typeof save.editsByDimension === 'object' ? save.editsByDimension : { overworld: save.edits },
       strongholdLocated: !!save.strongholdLocated,
       dragonDefeated: !!save.dragonDefeated,
       bastionLooted: !!save.bastionLooted,
@@ -688,7 +700,7 @@ function showToast(message: string): void {
 }
 
 function setViewZoom(value: number): void {
-  viewZoom = Math.max(0.5, Math.min(1.8, Math.round(value * 20) / 20))
+  viewZoom = Math.max(0.25, Math.min(1.8, Math.round(value * 20) / 20))
   camera.fov = viewZoom >= 1 ? 72 / viewZoom : 72 + (1 - viewZoom) * 72
   camera.updateProjectionMatrix()
   $<HTMLInputElement>('#view-zoom').value = String(viewZoom)
@@ -696,7 +708,7 @@ function setViewZoom(value: number): void {
 }
 
 function setUiScale(value: number): void {
-  uiScale = Math.max(0.9, Math.min(1.3, Math.round(value * 20) / 20))
+  uiScale = Math.max(1.1, Math.min(1.3, Math.round(value * 20) / 20))
   app.style.setProperty('--ui-scale', String(uiScale))
   app.style.setProperty('--ui-offset', `${Math.round((uiScale - 1) * 95)}px`)
   $<HTMLInputElement>('#ui-size').value = String(uiScale)
@@ -740,8 +752,27 @@ async function enterFullscreen(): Promise<void> {
   updateFullscreenButton()
 }
 
+function keepCameraOutsideWorld(): void {
+  const origin = new THREE.Vector3(player.x, player.foot + (crouching ? 1.16 : 1.58), player.z)
+  const direction = camera.position.clone().sub(origin)
+  const distance = direction.length()
+  if (distance < 0.1) return
+  direction.multiplyScalar(1 / distance)
+  for (let travel = 0.3; travel <= distance; travel += 0.2) {
+    const block = world.getBlock(
+      Math.floor(origin.x + direction.x * travel),
+      Math.floor(origin.y + direction.y * travel),
+      Math.floor(origin.z + direction.z * travel),
+    )
+    if (block && block !== 'fire' && !block.startsWith('painting_') && !block.startsWith('item_frame_')) {
+      camera.position.copy(origin).addScaledVector(direction, Math.max(0.1, travel - 0.35))
+      break
+    }
+  }
+}
+
 function updateCamera(): void {
-  const cameraDistance = 3.5 / Math.sqrt(viewZoom)
+  const cameraDistance = Math.min(5, 3.5 / Math.sqrt(viewZoom))
   avatar.position.set(player.x, player.foot, player.z)
   formGroup.position.set(player.x, player.foot - (crouching ? 0.25 : 0), player.z)
   formGroup.rotation.y = player.yaw
@@ -751,11 +782,12 @@ function updateCamera(): void {
   avatar.rotation.x = emoteUntil > performance.now() ? Math.cos(performance.now() * 0.003 * (1 + emoteIndex % 3)) * (0.08 + emoteIndex % 7 * 0.035) : 0
   avatar.visible = thirdPerson && !transform && !itemForm && skinShape !== 'air'
   if (cameraMode === 3) {
-    const back = 1.5 / viewZoom
-    camera.position.set(player.x + Math.sin(player.yaw) * back, player.foot + 11 / viewZoom, player.z + Math.cos(player.yaw) * back)
+    const back = 3
+    camera.position.set(player.x + Math.sin(player.yaw) * back, player.foot + 20, player.z + Math.cos(player.yaw) * back)
     camera.lookAt(player.x, player.foot + 0.8, player.z)
   } else if (cameraMode === 2) {
     camera.position.set(player.x - Math.sin(player.yaw) * cameraDistance, player.foot + (crouching ? 1.4 : 1.85), player.z - Math.cos(player.yaw) * cameraDistance)
+    keepCameraOutsideWorld()
     camera.lookAt(player.x, player.foot + 1.1, player.z)
   } else if (thirdPerson) {
     camera.position.set(
@@ -763,6 +795,7 @@ function updateCamera(): void {
       player.foot + (crouching ? 2.05 : 2.5) + Math.sin(player.pitch) * 1.1,
       player.z + Math.cos(player.yaw) * cameraDistance,
     )
+    keepCameraOutsideWorld()
     camera.rotation.set(player.pitch, player.yaw, 0)
   } else {
     camera.position.set(player.x, player.foot + (crouching ? 1.16 : 1.58), player.z)
@@ -794,10 +827,14 @@ function updateTarget(): void {
     targetOutline.visible = false
     return
   }
+  const playerEye = new THREE.Vector3(player.x, player.foot + (crouching ? 1.16 : 1.58), player.z)
+  const reach = 6
+  raycaster.far = camera.position.distanceTo(playerEye) + reach
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera)
   const hit = raycaster.intersectObject(world.mesh, false)[0]
-  const mobHit = entities.target(camera)
-  if (mobHit && (!hit || mobHit.distance <= hit.distance + 0.02)) {
+  const mobHit = entities.target(camera, raycaster.far)
+  if (mobHit && Math.hypot(player.x - mobHit.mob.x, player.z - mobHit.mob.z) <= reach &&
+      (!hit || mobHit.distance <= hit.distance + 0.02)) {
     const mob = mobHit.mob
     currentMob = mob
     currentTarget = null
@@ -808,7 +845,7 @@ function updateTarget(): void {
   }
   currentMob = null
   $('#mine-label').textContent = '挖掘'
-  if (!hit?.face) {
+  if (!hit?.face || playerEye.distanceTo(hit.point) > reach) {
     currentTarget = null
     targetOutline.visible = false
     targetLabel.textContent = '滑动屏幕，环顾四周'
@@ -1038,14 +1075,15 @@ function handleOnlineMessage(message: Record<string, unknown>): void {
       if (!entry || typeof entry !== 'object' || !['overworld', 'nether', 'end', 'end_city'].includes(entry.dimension)) continue
       const dim = entry.dimension as Dimension
       if (!Number.isInteger(entry.x) || !Number.isInteger(entry.y) || !Number.isInteger(entry.z)) continue
-      const block = typeof entry.block_id === 'string' && BLOCKS.some((item) => item.id === entry.block_id) ? entry.block_id : null
+      if (entry.block_id !== null && !validBlock(entry.block_id)) continue
+      const block = entry.block_id as BlockId | null
       ;(sharedEdits[dim] ??= []).push([`${entry.x},${entry.y},${entry.z}`, block])
     }
     world.setDimension('overworld', sharedEdits.overworld ?? [])
     player.x = 0.5; player.z = 0.5; player.foot = world.surfaceTop(0, 0)
     entities.removeAll()
     for (const entry of Array.isArray(message.entities) ? message.entities : []) {
-      if (entry.dimension === 'overworld' && entry.kind in mobInfo && Number.isFinite(entry.x) && Number.isFinite(entry.z)) {
+      if (entry.dimension === 'overworld' && Object.hasOwn(mobInfo, entry.kind) && Number.isFinite(entry.x) && Number.isFinite(entry.z)) {
         entities.spawn(entry.kind as MobKind, entry.x, entry.z)
       }
     }
@@ -1055,13 +1093,14 @@ function handleOnlineMessage(message: Record<string, unknown>): void {
   if (message.type === 'edit' && onlineWorldId && ['overworld', 'nether', 'end', 'end_city'].includes(String(message.dimension))) {
     const dim = message.dimension as Dimension
     if (![message.x, message.y, message.z].every(Number.isInteger)) return
-    const block = typeof message.blockId === 'string' && BLOCKS.some((item) => item.id === message.blockId) ? message.blockId : null
+    if (message.blockId !== null && !validBlock(message.blockId)) return
+    const block = message.blockId as BlockId | null
     if (dim === world.dimension) world.setBlock(Number(message.x), Number(message.y), Number(message.z), block)
     const key = `${message.x},${message.y},${message.z}`
     sharedEdits[dim] = [...(sharedEdits[dim] ?? []).filter(([id]) => id !== key), [key, block]]
     return
   }
-  if (message.type === 'spawn' && message.dimension === world.dimension && typeof message.kind === 'string' && message.kind in mobInfo && Number.isFinite(message.x) && Number.isFinite(message.z)) {
+  if (message.type === 'spawn' && message.dimension === world.dimension && typeof message.kind === 'string' && Object.hasOwn(mobInfo, message.kind) && Number.isFinite(message.x) && Number.isFinite(message.z)) {
     entities.spawn(message.kind as MobKind, Number(message.x), Number(message.z))
     return
   }
@@ -2076,7 +2115,6 @@ let previousY = 0
 const lookTouches = new Map<number, { x: number; y: number }>()
 let pinchStartDistance = 0
 let pinchStartZoom = viewZoom
-let pinchStartUi = uiScale
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if (!playing || panelOpen || lookTouches.size >= 2 || event.clientX < window.innerWidth * 0.28 && lookTouches.size === 0) return
   lookTouches.set(event.pointerId, { x: event.clientX, y: event.clientY })
@@ -2089,7 +2127,6 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     const [a, b] = [...lookTouches.values()]
     pinchStartDistance = Math.hypot(a.x - b.x, a.y - b.y)
     pinchStartZoom = viewZoom
-    pinchStartUi = uiScale
     lookPointer = null
   }
 })
@@ -2102,7 +2139,6 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     if (pinchStartDistance > 8) {
       const ratio = distance / pinchStartDistance
       setViewZoom(pinchStartZoom * ratio)
-      setUiScale(pinchStartUi * Math.pow(ratio, 0.35))
     }
     return
   }
@@ -2125,7 +2161,7 @@ function stopLook(event: PointerEvent): void {
   pinchStartDistance = 0
   if (pinching) {
     saveWorld()
-    showToast(`画面 ${Math.round(viewZoom * 100)}% · 按钮 ${Math.round(uiScale * 100)}%`)
+    showToast(`地图视野 ${Math.round(viewZoom * 100)}%；按钮大小保持不变`)
   }
 }
 renderer.domElement.addEventListener('pointerup', stopLook)

@@ -201,15 +201,15 @@ h2 span { color: #82aa87; font-size: 13px; }
 @media (max-height: 610px) {
   .joystick { bottom: calc(env(safe-area-inset-bottom) + 75px); width: 95px; height: 95px; }
   .joystick-knob { width: 46px; height: 46px; }
-  .action-controls { bottom: calc(env(safe-area-inset-bottom) + 79px); grid-template-columns: repeat(2, 50px); gap: 5px; }
+  .action-controls { bottom: calc(env(safe-area-inset-bottom) + 79px); grid-template-columns: repeat(2, 60px); gap: 7px; }
   .movement-controls { left: 11px; bottom: calc(env(safe-area-inset-bottom) + 177px + var(--ui-offset)); }
-  .small-action { width: 46px; height: 39px; }
-  .round-action { width: 50px; height: 50px; border-radius: 15px; }
-  .action-icon { font-size: 18px; }
-  .round-action small { font-size: 8px; }
-  .hotbar { max-width: 360px; margin: auto; }
-  .hotbar-slot { max-height: 35px; }
-  .hotbar .block-swatch { width: 20px; height: 20px; }
+  .round-action { width: 60px; height: 60px; border-radius: 17px; }
+  .movement-controls .small-action { width: 52px; height: 48px; }
+  .action-icon { font-size: 21px; }
+  .round-action small { font-size: 9px; }
+  .hotbar { max-width: 485px; margin: auto; }
+  .hotbar-slot { max-height: 45px; }
+  .hotbar .block-swatch { width: 24px; height: 24px; }
   .status-line { margin-bottom: 3px; padding: 3px 10px; }
   .welcome-card { padding: 16px 22px; }
   .welcome-emblem { display: none; }

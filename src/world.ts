@@ -246,7 +246,10 @@ export class VoxelWorld {
   }
 
   applyEdits(edits: [string, Voxel][]): void {
-    for (const [id, block] of edits) {
+    for (const entry of edits) {
+      if (!Array.isArray(entry) || entry.length !== 2) continue
+      const [id, block] = entry
+      if (typeof id !== 'string' || block !== null && typeof block !== 'string') continue
       if (!/^-?\d+,-?\d+,-?\d+$/.test(id)) continue
       const [x, y, z] = id.split(',').map(Number)
       if (x < -this.radius || x >= this.radius || z < -this.radius || z >= this.radius || y < 0 || y > 25) continue

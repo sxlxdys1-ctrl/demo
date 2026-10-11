@@ -83,9 +83,9 @@ export function normalizeInventory(raw: unknown): Inventory {
   if (!Array.isArray(raw)) return result
   for (let i = 0; i < Math.min(INVENTORY_SIZE, raw.length); i++) {
     const slot = raw[i]
-    if (typeof slot === 'string' && allItems[slot]) result[i] = { id: slot, count: itemInfo(slot).stack }
+    if (typeof slot === 'string' && Object.hasOwn(allItems, slot)) result[i] = { id: slot, count: itemInfo(slot).stack }
     else if (slot && typeof slot === 'object' && typeof slot.id === 'string' &&
-      allItems[slot.id] && Number.isInteger(slot.count) && slot.count > 0) {
+      Object.hasOwn(allItems, slot.id) && Number.isInteger(slot.count) && slot.count > 0) {
       const max = itemInfo(slot.id).maxDurability
       result[i] = {
         id: slot.id,
@@ -125,7 +125,8 @@ export function countItem(inventory: Inventory, id: ItemId): number {
 }
 
 export function addItem(inventory: Inventory, id: ItemId, count: number): number {
-  if (!allItems[id] || !Number.isSafeInteger(count) || count < 0) return count
+  if (!Object.hasOwn(allItems, id) || !Number.isSafeInteger(count) || count < 0) return count
+  if (count === 0) return 0
   const limit = itemInfo(id).stack
   for (const slot of inventory) {
     if (slot?.id !== id || slot.count >= limit) continue

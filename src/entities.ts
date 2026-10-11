@@ -85,9 +85,9 @@ export class EntityManager {
     return mob
   }
 
-  target(camera: THREE.Camera): { mob: Mob; distance: number } | null {
+  target(camera: THREE.Camera, maxDistance = 7): { mob: Mob; distance: number } | null {
     const ray = new THREE.Raycaster()
-    ray.far = 7
+    ray.far = maxDistance
     ray.setFromCamera(new THREE.Vector2(0, 0), camera)
     const hit = ray.intersectObjects(this.mobs.map((mob) => mob.group), true)[0]
     if (!hit) return null
