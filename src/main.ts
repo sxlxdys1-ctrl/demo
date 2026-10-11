@@ -49,10 +49,10 @@ const modeNames: Record<GameMode, string> = {
 }
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
-  <div id="game" aria-label="我的世界游戏画面"></div>
+  <div id="game" aria-label="超级好玩的小世界游戏画面"></div>
   <div class="grain" aria-hidden="true"></div>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark">✦</span><div><strong>我的世界</strong><small>非官方个人版 · 横屏游玩</small></div></div>
+    <div class="brand"><span class="brand-mark">✦</span><div><strong>超级好玩的小世界</strong><small>个人版 · 横屏游玩</small></div></div>
     <div class="top-actions"><button id="transform-button" class="icon-button" aria-label="生物变身">⚔</button><span id="clock" class="glass-pill">☀ 第 1 天 · 12:00</span><button id="fullscreen-button" class="icon-button fullscreen-button" aria-label="进入全屏" title="全屏游玩"><span aria-hidden="true">⛶</span><small>全屏</small></button><button id="menu-button" class="icon-button" aria-label="打开菜单">☰</button></div>
   </header>
   <div id="target-label" class="target-label">滑动屏幕，环顾四周</div>
@@ -78,11 +78,11 @@ app.innerHTML = `
     <div class="welcome-card">
       <div class="eyebrow">属于你的第一片方块天地</div>
       <div class="welcome-emblem">✦</div>
-      <h1>我的<br><em>世界</em></h1>
+      <h1>超级好玩的<br><em>小世界</em></h1>
       <p>从一块草地开始，挖出你的灵感，搭起独一无二的小天地。</p>
       <div class="instruction-row"><span>◉ 左边摇杆移动</span><span>↔ 右边滑动视角</span></div>
       <button id="welcome-fullscreen-button" class="fullscreen-entry-button">⛶ 全屏显示</button>
-      <button id="start-button" class="primary-button">全屏进入我的世界 <span>→</span></button>
+      <button id="start-button" class="primary-button">全屏进入小世界 <span>→</span></button>
       <button id="welcome-skin-button" class="menu-option">制作皮肤 <span>✎</span></button>
       <small class="welcome-note">进度保存在此浏览器中 · 建议横屏探索</small>
     </div>

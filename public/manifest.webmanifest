@@ -1,7 +1,7 @@
 {
-  "name": "我的世界",
-  "short_name": "我的世界",
-  "description": "非官方个人横屏方块游戏",
+  "name": "超级好玩的小世界",
+  "short_name": "小世界",
+  "description": "超级好玩的小世界：个人横屏方块游戏",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",
