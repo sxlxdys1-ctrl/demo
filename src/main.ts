@@ -430,18 +430,22 @@ function swatch(id: ItemId): string {
 function updateFormAppearance(): void {
   formGroup.clear()
   if (transform) formGroup.add(makeMob(transform))
-  else if (itemForm) {
+  else if (itemForm && itemForm !== 'air') {
     const name = itemForm.endsWith('_spawn_egg')
     const hue = [...itemForm].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 360
-    const material = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(hue / 360, 0.48, 0.62) })
     if (name) {
+      const material = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(hue / 360, 0.48, 0.62) })
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.7, 1), material)
       body.position.y = 0.75
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.56, 0.5), material)
       head.position.set(0, 1.28, -0.47)
       formGroup.add(body, head)
     } else {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.75), material)
+      const texture = new THREE.TextureLoader().load(iconUrl(itemForm, BLOCKS.find((block) => blockItems[block.id] === itemForm)?.color))
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.magFilter = THREE.NearestFilter
+      texture.minFilter = THREE.NearestFilter
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.75), new THREE.MeshLambertMaterial({ map: texture }))
       mesh.position.y = 0.45
       formGroup.add(mesh)
     }
