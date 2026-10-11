@@ -1443,8 +1443,8 @@ $<HTMLInputElement>('#item-search').addEventListener('input', renderCatalog)
 $('#start-button').addEventListener('click', () => {
   playing = true
   $('#welcome').classList.add('hidden')
-  void enterFullscreen()
   showToast('开始探索！对准方块试试挖掘')
+  void enterFullscreen()
 })
 $('#welcome-skin-button').addEventListener('click', () => openPanel('#skin-panel'))
 $('#fullscreen-button').addEventListener('click', () => {
